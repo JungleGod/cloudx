@@ -1,0 +1,38 @@
+server:
+  port: 9090
+
+spring:
+  application:
+    name: ai-agent
+  config:
+    import: optional:nacos:ai-agent.yaml
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+# DeepSeek 大模型配置
+langchain4j:
+  open-ai:
+    chat-model:
+      api-key: sk-6f84427793374de68c30c14352777ab8
+      base-url: https://api.deepseek.com
+      model-name: deepseek-chat
+      temperature: 0.7
+      max-tokens: 2048
+      timeout: 60s
+      log-requests: true
+      log-responses: true
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+# 日志
+logging:
+  level:
+    com.cloudx: debug

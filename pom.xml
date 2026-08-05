@@ -15,9 +15,9 @@
     <modules>
         <module>common</module>
         <module>services/biz-service</module>
+        <module>services/ai-agent</module>
         <!-- 后期加入 -->
         <!-- <module>gateway</module> -->
-        <!-- <module>services/ai-agent</module> -->
     </modules>
 
     <properties>
@@ -30,6 +30,7 @@
         <spring-boot.version>3.3.5</spring-boot.version>
         <spring-cloud.version>2023.0.3</spring-cloud.version>
         <spring-cloud-alibaba.version>2023.0.1.2</spring-cloud-alibaba.version>
+        <langchain4j.version>1.0.0-beta1</langchain4j.version>
     </properties>
 
     <dependencyManagement>
@@ -66,6 +67,15 @@
                 <groupId>com.cloudx</groupId>
                 <artifactId>common</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+
+            <!-- LangChain4j BOM -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-bom</artifactId>
+                <version>${langchain4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
