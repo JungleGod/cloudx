@@ -16,8 +16,7 @@
         <module>common</module>
         <module>services/biz-service</module>
         <module>services/ai-agent</module>
-        <!-- 后期加入 -->
-        <!-- <module>gateway</module> -->
+        <module>gateway</module>
     </modules>
 
     <properties>

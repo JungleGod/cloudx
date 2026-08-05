@@ -16,10 +16,10 @@
     <description>公共模块 — 工具类、统一返回格式、异常定义</description>
 
     <dependencies>
-        <!-- Spring Web（提供 HttpStatus、ResponseEntity 等） -->
+        <!-- Spring Web 基础（HttpStatus、ResponseEntity 等，不绑定 Servlet/WebFlux） -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
         </dependency>
 
         <!-- Lombok -->
