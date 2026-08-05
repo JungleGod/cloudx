@@ -1,55 +1,30 @@
 package com.cloudx.aiagent.service;
 
-import dev.langchain4j.model.openai.OpenAiChatModel;
-import jakarta.annotation.PostConstruct;
+import com.cloudx.aiagent.routing.ModelRouter;
+import com.cloudx.aiagent.routing.ModelRouter.RouteResult;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
+import java.util.Map;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ChatService {
 
-    @Value("${langchain4j.open-ai.chat-model.api-key}")
-    private String apiKey;
+    private final ModelRouter modelRouter;
 
-    @Value("${langchain4j.open-ai.chat-model.base-url}")
-    private String baseUrl;
-
-    @Value("${langchain4j.open-ai.chat-model.model-name}")
-    private String modelName;
-
-    @Value("${langchain4j.open-ai.chat-model.temperature}")
-    private double temperature;
-
-    @Value("${langchain4j.open-ai.chat-model.max-tokens}")
-    private int maxTokens;
-
-    @Value("${langchain4j.open-ai.chat-model.timeout}")
-    private Duration timeout;
-
-    private OpenAiChatModel model;
-
-    @PostConstruct
-    public void init() {
-        log.info("Initializing DeepSeek chat model: baseUrl={}, model={}", baseUrl, modelName);
-        this.model = OpenAiChatModel.builder()
-                .apiKey(apiKey)
-                .baseUrl(baseUrl)
-                .modelName(modelName)
-                .temperature(temperature)
-                .maxTokens(maxTokens)
-                .timeout(timeout)
-                .build();
-        log.info("DeepSeek chat model initialized successfully");
+    public RouteResult chat(String message) {
+        return chat(message, null);
     }
 
-    public String chat(String message) {
-        log.debug("User message: {}", message);
-        String reply = model.chat(message);
-        log.debug("AI reply: {}", reply);
-        return reply;
+    public RouteResult chat(String message, String taskType) {
+        return modelRouter.route(message, taskType);
+    }
+
+    /** 获取所有模型的状态 */
+    public Map<String, String> modelStatus() {
+        return modelRouter.getProviderStatus();
     }
 }
