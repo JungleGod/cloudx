@@ -33,7 +33,6 @@ cloudx:
       model-name: deepseek-chat
       keys:
         - ${DEEPSEEK_API_KEY:}
-        - ${DEEPSEEK_API_KEY_2:}
       tags: [code, general, chinese]
       priority: 1
       max-failures: 3

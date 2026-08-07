@@ -58,7 +58,13 @@ spring:
         - id: biz-user-auth
           uri: lb://biz-service
           predicates:
-            - Path=/api/user/**,/api/keys/**
+            - Path=/api/user/**,/api/keys/**,/api/stats/**
+
+        # ===== 内部接口（不对外暴露）=====
+        - id: biz-internal
+          uri: lb://biz-service
+          predicates:
+            - Path=/api/internal/**
 
   # Nacos 不再需要手动配置（在 bootstrap.yml 里）
 
@@ -69,7 +75,7 @@ jwt:
 # 鉴权白名单（无需 Token）
 gateway:
   auth:
-    white-list: /api/user/register,/api/user/login,/api/models,/health,/actuator/health
+    white-list: /api/user/register,/api/user/login,/api/models,/health,/actuator/health,/api/internal/
 
 # Actuator
 management:

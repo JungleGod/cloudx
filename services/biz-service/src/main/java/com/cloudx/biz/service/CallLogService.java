@@ -10,4 +10,13 @@ public interface CallLogService extends IService<CallLog> {
                 String requestBody, String responseBody,
                 int tokensInput, int tokensOutput,
                 long latencyMs, boolean success, String errorMsg);
+
+    /** 今日统计 */
+    java.util.Map<String, Object> statsToday(Long userId);
+
+    /** 按模型统计（近 N 天） */
+    java.util.List<java.util.Map<String, Object>> statsByModel(int days);
+
+    /** 每日统计（近 N 天） */
+    java.util.List<java.util.Map<String, Object>> statsDaily(int days);
 }

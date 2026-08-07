@@ -101,28 +101,59 @@ cloudx/
 ```
 1. ✅ docker-compose 搭建 MySQL + Redis + Nacos 基础设施（已完成 2026-08-04）
 2. ✅ biz-service：用户管理 + API Key 管理 + 调用日志存储（已完成 2026-08-04）
-   ✅ sys_user / api_key / call_log / api_interface 四张表
-   ✅ 用户注册/登录（JWT + BCrypt）
-   ✅ API Key 生成/查询/启禁（AK/SK 签名机制）
-   ✅ 调用日志记录服务
-   🔲 test.http 验证 API 通不通（注册、登录、创建 Key）
-3. 🔲 ai-agent：LangChain4j 接入第一个模型，跑通对话
-4. 🔲 ai-agent：模型路由 + 故障转移 + 负载均衡
-5. 🔲 gateway：鉴权 + 限流 + 路由转发
-6. 🔲 biz-service：成本统计 + 调用量分析
-7. 🔲 Nacos 配置中心：提示词模板、路由规则在线修改生效
-8. 🔲 frontend：管理控制台（API Key 管理、用量图表、在线调试）
+3. ✅ ai-agent：LangChain4j 接入 DeepSeek，跑通对话（已完成 2026-08-05）
+4. ✅ ai-agent：模型路由 + 故障转移 + 负载均衡（已完成 2026-08-05）
+5. ✅ gateway：鉴权 + 限流 + 路由转发（已完成 2026-08-05）
+6. 🔲 biz-service：成本统计 + 调用量分析（代码完成+编译通过，待运行时验证 2026-08-05）
+7. ✅ frontend：React 管理控制台（日志/仪表盘/API Key/在线调试，编译通过 2026-08-05）
+8. 🔲 Nacos 配置中心：提示词模板、路由规则在线修改生效
 9. 🔲 全链路压测，调优，确保 4C8G 下流畅
 10. 🔲 部署到腾讯云
 ```
 
 ## 当前进度
 
-- **2026-08-04**：基础设施 + biz-service 代码完成，待验证 API
-  - Docker：MySQL ✅ Redis ✅ Nacos ✅ 全部 healthy
-  - Nacos 从 MySQL 模式切换到嵌入式模式（本地开发更简单）
-  - biz-service 新增了 15 个 Java 文件（entity/mapper/dto/service/controller/config/util）
-  - 明天：验证 API → 创建 ai-agent 模块 → 接入大模型
+- **2026-08-05**：成本统计 + 前端管理控制台完成，调整顺序前端先行以便联调可视化
+  - ✅ ai-agent：LangChain4j 接入 DeepSeek，跑通对话
+  - ✅ ai-agent：策略路由（关键词/taskType）+ 轮询负载均衡 + 熔断故障转移
+  - ✅ gateway：Spring Cloud Gateway 统一入口（8080），JWT 鉴权 + AK/SK 签名 + Redis 限流
+  - ✅ 全链路调通：客户端 → gateway(鉴权) → ai-agent(路由) → DeepSeek
+  - ✅ 成本统计（代码+编译通过）：CallLogClient → CallLogController → MySQL，stats API（today/by-model/daily）
+  - ✅ React 前端（代码+编译通过）：React 18 + Ant Design 5 + Vite + Recharts
+    - 5 个页面：登录、注册、仪表盘（统计卡片+饼图+趋势图）、API Key 管理、AI 在线调试
+    - Axios 封装（自动带 Token、统一错误处理）、AuthContext 全局认证状态
+  - 🔲 启动后端服务 + 前端，联调验证整套链路
+  - 🔲 Nacos 配置中心热更新（路由规则/提示词模板）
+  - 🔲 全链路压测，调优，确保 4C8G 下流畅
+  - 🔲 部署到腾讯云
+
+### 当前模块总览
+
+| 模块 | 端口 | 功能 | 状态 |
+|------|------|------|------|
+| MySQL | 3306 | 数据持久化 | 🟢 |
+| Redis | 6379 | 缓存+限流 | 🟢 |
+| Nacos | 8848 | 注册中心+配置中心 | 🟢 |
+| gateway | 8080 | 统一入口、JWT鉴权、路由转发、Redis限流 | 🟢 |
+| biz-service | 8081 | 用户注册/登录、API Key管理、调用日志、成本统计 | 🟢 |
+| ai-agent | 9090 | DeepSeek对话、模型路由、负载均衡、故障转移 | 🟢 |
+
+### 调用链路
+
+```
+客户端 → gateway:8080 (JWT鉴权→限流)
+           ├─→ /api/chat → ai-agent:9090 (ModelRouter→LoadBalancer→DeepSeek)
+           ├─→ /api/user/** → biz-service:8081
+           ├─→ /api/keys/** → biz-service:8081
+           ├─→ /api/stats/** → biz-service:8081
+           └─→ /api/internal/** → biz-service:8081
+```
+
+### API Key 注意事项
+
+- `application.yml` 中 DeepSeek Key 用 `${DEEPSEEK_API_KEY:默认值}` 占位
+- 部署到生产应移除默认值，改为环境变量或 Nacos 配置中心
+- `.gitignore` 中已忽略 `application-local.yml`
 
 ## 面试能聊的关键点
 
