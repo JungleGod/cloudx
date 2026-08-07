@@ -114,6 +114,10 @@ cloudx/
 
 ## 当前进度
 
+- **2026-08-07（晚间）**：登录页重设计 + Git 安全修复
+  - ✅ 登录/注册页重设计：参考阿里云风格，左右分栏布局，左侧深色品牌区（CSS 手绘控制台插画 + 产品介绍），右侧白色表单卡片
+  - ✅ Git 安全修复：GitHub Push Protection 检测到历史提交中有硬编码 DeepSeek API Key，通过 rebase 清理历史，改用 `${DEEPSEEK_API_KEY:}` 占位符
+
 - **2026-08-07（下午）**：多会话 + 文件上传 + 关键 Bug 修复
   - ✅ 多会话系统：conversation / conversation_message 表，biz-service CRUD API，ChatPage + ConversationSidebar 前端
   - ✅ 文件上传：支持 TXT/代码/JSON/CSV/PDF 等 30+ 格式，前端提取文本拼入 prompt，零后端改动
