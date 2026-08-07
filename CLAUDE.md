@@ -107,13 +107,23 @@ cloudx/
 6. ✅ biz-service：成本统计 + 调用量分析（已验证通过 2026-08-07）
 7. ✅ frontend：React 管理控制台（已验证通过 2026-08-07）
 8. ✅ Nacos 配置中心热更新（模型配置实时生效，已完成 2026-08-07）
-9. 🔲 全链路压测，调优，确保 4C8G 下流畅
+9. ✅ 多会话系统 + 文件上传 + 上下文修复 + 流式日志（已完成 2026-08-07）
+10. 🔲 全链路压测，调优，确保 4C8G 下流畅
 10. 🔲 部署到腾讯云
 ```
 
 ## 当前进度
 
-- **2026-08-07**：联调验证 + Nacos 热更新 + Bug 修复
+- **2026-08-07（下午）**：多会话 + 文件上传 + 关键 Bug 修复
+  - ✅ 多会话系统：conversation / conversation_message 表，biz-service CRUD API，ChatPage + ConversationSidebar 前端
+  - ✅ 文件上传：支持 TXT/代码/JSON/CSV/PDF 等 30+ 格式，前端提取文本拼入 prompt，零后端改动
+  - ✅ 修复切模型上下文混乱：history 携带 model，buildPrompt 标注 AI(模型名)，切换时插入身份提示
+  - ✅ 修复流式调用不记日志：ChatService.chatStream 包装 callback 自动记录 callLog，概览有数据
+  - ✅ UI 优化：附件按钮上下排列，高度对齐输入框
+  - 🔲 突出 Agent 核心能力
+  - 🔲 支持自定义 Agent 集成
+
+- **2026-08-07（上午）**：联调验证 + Nacos 热更新 + Bug 修复
   - ✅ 全链路联调通过：前端 → gateway → biz-service/ai-agent → MySQL/Redis/Nacos
   - ✅ Nacos 配置中心热更新：`cloudx.models` + `cloudx.pricing` 迁移到 Nacos，`ModelRouter` 监听 `RefreshScopeRefreshedEvent` 自动重建
   - ✅ DeepSeek + 通义千问 双模型接入，互相 fallback
