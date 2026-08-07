@@ -10,6 +10,7 @@ import {
   MenuUnfoldOutlined,
   UserOutlined,
   ApiOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { Spin } from 'antd';
@@ -18,7 +19,7 @@ const { Header, Sider, Content } = Layout;
 
 /** 需登录才能访问，带侧边栏 */
 export default function AppLayout() {
-  const { token, username, loading, logout } = useAuth();
+  const { token, username, role, loading, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -39,7 +40,8 @@ export default function AppLayout() {
   const menuItems = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '概览' },
     { key: '/api-keys', icon: <KeyOutlined />, label: 'API Key' },
-    { key: '/playground', icon: <ExperimentOutlined />, label: '在线调试' },
+    { key: '/chat', icon: <ExperimentOutlined />, label: '在线调试' },
+    ...(role === 'admin' ? [{ key: '/admin', icon: <TeamOutlined />, label: '用户管理' }] : []),
   ];
 
   const selectedKey = '/' + location.pathname.split('/')[1];

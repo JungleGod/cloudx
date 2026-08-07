@@ -14,7 +14,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await login(values);
-      auth.login(res.data.token, res.data.username);
+      auth.login(res.data.token, res.data.username, res.data.role || 'user');
       message.success(`欢迎回来，${res.data.username}`);
       navigate('/dashboard', { replace: true });
     } catch {

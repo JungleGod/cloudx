@@ -53,8 +53,9 @@ public class UserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impleme
             throw new BizException("用户名或密码错误");
         }
 
-        String token = jwtUtil.generate(user.getId(), user.getUsername());
-        return Map.of("token", token, "userId", user.getId(), "username", user.getUsername());
+        String role = user.getRole() != null ? user.getRole() : "user";
+        String token = jwtUtil.generate(user.getId(), user.getUsername(), role);
+        return Map.of("token", token, "userId", user.getId(), "username", user.getUsername(), "role", role);
     }
 
     @Override

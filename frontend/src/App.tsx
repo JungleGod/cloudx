@@ -8,7 +8,8 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import ApiKeysPage from './pages/ApiKeysPage';
-import PlaygroundPage from './pages/PlaygroundPage';
+import ChatPage from './pages/ChatPage';
+import AdminUsersPage from './pages/AdminUsersPage';
 
 export default function App() {
   return (
@@ -26,7 +27,9 @@ export default function App() {
             <Route element={<AppLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/api-keys" element={<ApiKeysPage />} />
-              <Route path="/playground" element={<PlaygroundPage />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/playground" element={<Navigate to="/chat" replace />} />
+              <Route path="/admin" element={<AdminUsersPage />} />
             </Route>
 
             {/* 默认跳转 */}

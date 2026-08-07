@@ -3,6 +3,7 @@ package com.cloudx.aiagent.routing;
 import com.cloudx.aiagent.config.ModelConfig;
 import com.cloudx.aiagent.provider.ModelProvider;
 import com.cloudx.aiagent.provider.OpenAiCompatibleProvider;
+import com.cloudx.aiagent.provider.StreamCallback;
 import com.cloudx.common.exception.BizException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -76,6 +77,44 @@ public class ModelRouter {
     }
 
     /**
+     * 流式路由 — 选择模型后流式回调，异常时自动 failover
+     */
+    public void routeStream(String message, String model, String taskType, StreamCallback callback) {
+        ModelProvider provider = select(message, model, taskType);
+        String strategy = resolveStrategy(model, taskType, message);
+
+        log.info("Streaming to [{}] via {}, message preview: {}...",
+                provider.getModelName(), strategy,
+                message.length() > 50 ? message.substring(0, 50) : message);
+
+        try {
+            provider.streamChat(message, callback);
+            provider.recordSuccess();
+        } catch (Exception e) {
+            log.error("Stream model [{}] failed: {}", provider.getModelName(), e.getMessage());
+            provider.recordFailure();
+
+            // 尝试回退到备用模型
+            ModelConfig.ModelInfo config = getConfig(provider.getModelName());
+            if (config.getFallback() != null) {
+                ModelProvider fallback = providers.get(config.getFallback());
+                if (fallback != null && fallback.isAvailable()) {
+                    log.warn("Stream falling back to [{}]", fallback.getModelName());
+                    try {
+                        fallback.streamChat(message, callback);
+                        fallback.recordSuccess();
+                        return;
+                    } catch (Exception fe) {
+                        log.error("Stream fallback [{}] also failed", fallback.getModelName());
+                        fallback.recordFailure();
+                    }
+                }
+            }
+            callback.onError(new BizException("所有可用模型流式调用失败，请稍后重试"));
+        }
+    }
+
+    /**
      * 路由结果，包含元信息
      */
     public record RouteResult(String reply, String model, String strategy, boolean failover) {}
@@ -83,17 +122,10 @@ public class ModelRouter {
     /**
      * 路由选择模型并执行对话
      */
-    public RouteResult route(String message, String taskType) {
-        ModelProvider provider = select(message, taskType);
-        String strategy = "default";
+    public RouteResult route(String message, String model, String taskType) {
+        ModelProvider provider = select(message, model, taskType);
+        String strategy = resolveStrategy(model, taskType, message);
         boolean failover = false;
-
-        // 确定路由策略名称
-        if (taskType != null && !taskType.isBlank()) {
-            strategy = "taskType=" + taskType;
-        } else if (matchByKeyword(message.toLowerCase()) != null) {
-            strategy = "keyword";
-        }
 
         log.info("Routing to [{}] via {}, message preview: {}...",
                 provider.getModelName(), strategy,
@@ -128,10 +160,29 @@ public class ModelRouter {
         }
     }
 
+    /** 解析路由策略名 */
+    private String resolveStrategy(String model, String taskType, String message) {
+        if (model != null && !model.isBlank()) return "user=" + model;
+        if (taskType != null && !taskType.isBlank()) return "taskType=" + taskType;
+        if (matchByKeyword(message.toLowerCase()) != null) return "keyword";
+        return "default";
+    }
+
     /**
      * 选择合适的模型
+     * @param model 用户手动指定的模型名，null 则自动选择
      */
-    private ModelProvider select(String message, String taskType) {
+    private ModelProvider select(String message, String model, String taskType) {
+        // 0. 用户手动指定模型（最高优先级）
+        if (model != null && !model.isBlank()) {
+            ModelProvider provider = providers.get(model);
+            if (provider != null && provider.isAvailable()) {
+                log.info("Using user-specified model: {}", model);
+                return provider;
+            }
+            log.warn("User-specified model [{}] not available, falling back to auto-select", model);
+        }
+
         String targetModel = null;
 
         // 1. 如果请求指定了 taskType，按标签匹配
@@ -231,6 +282,36 @@ public class ModelRouter {
                 .filter(m -> m.getName().equals(modelName))
                 .findFirst()
                 .orElseThrow(() -> new BizException("模型配置不存在: " + modelName));
+    }
+
+    /** 多模态路由 — 支持图片输入 */
+    public RouteResult routeMultimodal(String text, List<String> base64Images, String model, String taskType) {
+        ModelProvider provider = select(text, model, taskType != null ? taskType : "multimodal");
+        String strategy = resolveStrategy(model, taskType, text);
+
+        try {
+            String reply = provider.chatMultimodal(text, base64Images);
+            provider.recordSuccess();
+            return new RouteResult(reply, provider.getModelName(), strategy, false);
+        } catch (Exception e) {
+            log.error("Multimodal model [{}] failed: {}", provider.getModelName(), e.getMessage());
+            provider.recordFailure();
+            ModelConfig.ModelInfo config = getConfig(provider.getModelName());
+            if (config.getFallback() != null) {
+                ModelProvider fallback = providers.get(config.getFallback());
+                if (fallback != null && fallback.isAvailable()) {
+                    try {
+                        String reply = fallback.chatMultimodal(text, base64Images);
+                        fallback.recordSuccess();
+                        return new RouteResult(reply, fallback.getModelName(), "failover", true);
+                    } catch (Exception fe) {
+                        log.error("Multimodal fallback [{}] also failed", fallback.getModelName());
+                        fallback.recordFailure();
+                    }
+                }
+            }
+            throw new BizException("多模态模型调用失败，请稍后重试");
+        }
     }
 
     public Map<String, String> getProviderStatus() {

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Card, Input, Button, Tag, Select, Space, Spin, Typography } from 'antd';
-import { SendOutlined, ClearOutlined } from '@ant-design/icons';
-import { sendMessage, getModelStatus, type ModelStatus, type HistoryMessage } from '../api/chat';
+import { Card, Input, Button, Tag, Select, Space, Spin, Typography, Switch } from 'antd';
+import { SendOutlined, ClearOutlined, ThunderboltOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons';
+import { sendMessage, sendMessageStream, sendMessageMultimodal, getModelStatus, type ModelStatus, type HistoryMessage } from '../api/chat';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -9,15 +9,15 @@ interface Message {
   model?: string;
   strategy?: string;
   failover?: boolean;
+  streaming?: boolean; // 是否正在流式输出中
 }
 
 const { TextArea } = Input;
 const { Text } = Typography;
 
 const STORAGE_KEY = 'cloudx-chat-messages';
-const MAX_HISTORY = 10; // 发送最近 N 条消息作为上下文
+const MAX_HISTORY = 10;
 
-/** 从 sessionStorage 恢复消息 */
 function loadMessages(): Message[] {
   try {
     const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -31,11 +31,15 @@ export default function PlaygroundPage() {
   const [messages, setMessages] = useState<Message[]>(loadMessages);
   const [input, setInput] = useState('');
   const [taskType, setTaskType] = useState<string | undefined>(undefined);
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const [sending, setSending] = useState(false);
+  const [streamMode, setStreamMode] = useState(true); // 默认开启流式
   const [models, setModels] = useState<ModelStatus>({});
+  const [images, setImages] = useState<string[]>([]); // base64 data URLs
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<(() => void) | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 每次消息变化，持久化到 sessionStorage
   useEffect(() => {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
   }, [messages]);
@@ -55,6 +59,45 @@ export default function PlaygroundPage() {
     sessionStorage.removeItem(STORAGE_KEY);
   }, []);
 
+  /** 停止流式输出 */
+  const handleStop = useCallback(() => {
+    abortRef.current?.();
+    abortRef.current = null;
+    setSending(false);
+    setMessages((prev) => {
+      const updated = [...prev];
+      const last = updated[updated.length - 1];
+      if (last && last.streaming) {
+        last.streaming = false;
+        if (!last.content) last.content = '(已中止)';
+      }
+      return updated;
+    });
+  }, []);
+
+  /** 选择图片并转为 base64 */
+  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const readers: Promise<string>[] = [];
+    for (let i = 0; i < Math.min(files.length, 5); i++) {
+      readers.push(new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(files[i]);
+      }));
+    }
+    Promise.all(readers).then((dataUrls) => {
+      setImages((prev) => [...prev, ...dataUrls].slice(0, 5));
+    });
+    // 重置 input 以便重新选择同一文件
+    e.target.value = '';
+  }, []);
+
+  const handleRemoveImage = useCallback((index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
   const handleSend = async () => {
     const msg = input.trim();
     if (!msg) return;
@@ -64,26 +107,90 @@ export default function PlaygroundPage() {
     setInput('');
     setSending(true);
 
-    // 取最近 MAX_HISTORY 条作为上下文（不含刚发的这条）
-    const recent = [...messages.slice(-MAX_HISTORY)].map(m => ({
+    const recent = [...messages.slice(-MAX_HISTORY)].map((m) => ({
       role: m.role,
       content: m.content,
     })) as HistoryMessage[];
 
-    try {
-      const res = await sendMessage(msg, taskType, recent);
-      const r = res.data;
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: r.reply, model: r.model, strategy: r.strategy, failover: r.failover },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: '请求失败，请稍后重试' },
-      ]);
-    } finally {
-      setSending(false);
+    if (images.length > 0) {
+      // ========== 多模态模式（暂用普通请求，后续可加流式） ==========
+      try {
+        const res = await sendMessageMultimodal(msg, images, taskType, selectedModel);
+        const r = res.data;
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: r.reply, model: r.model, strategy: r.strategy, failover: r.failover },
+        ]);
+        setImages([]);
+      } catch {
+        setMessages((prev) => [...prev, { role: 'assistant', content: '请求失败，请稍后重试' }]);
+      } finally {
+        setSending(false);
+      }
+    } else if (streamMode) {
+      // ========== 流式模式 ==========
+      const assistantMsg: Message = { role: 'assistant', content: '', streaming: true };
+      setMessages((prev) => [...prev, assistantMsg]);
+
+      const abort = sendMessageStream(
+        msg,
+        {
+          onToken: (token) => {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last && last.streaming) {
+                last.content += token;
+              }
+              return updated;
+            });
+          },
+          onDone: () => {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last && last.streaming) {
+                last.streaming = false;
+              }
+              return updated;
+            });
+            setSending(false);
+            abortRef.current = null;
+          },
+          onError: (error) => {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last && last.streaming) {
+                last.streaming = false;
+                if (!last.content) last.content = `请求失败: ${error}`;
+              }
+              return updated;
+            });
+            setSending(false);
+            abortRef.current = null;
+          },
+        },
+        taskType,
+        recent,
+        selectedModel,
+      );
+
+      abortRef.current = abort;
+    } else {
+      // ========== 普通模式 ==========
+      try {
+        const res = await sendMessage(msg, taskType, recent, selectedModel);
+        const r = res.data;
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: r.reply, model: r.model, strategy: r.strategy, failover: r.failover },
+        ]);
+      } catch {
+        setMessages((prev) => [...prev, { role: 'assistant', content: '请求失败，请稍后重试' }]);
+      } finally {
+        setSending(false);
+      }
     }
   };
 
@@ -99,10 +206,27 @@ export default function PlaygroundPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2>🧪 在线调试</h2>
         <Space>
+          <span style={{ fontSize: 13, color: '#666' }}>
+            <ThunderboltOutlined /> 流式输出
+          </span>
+          <Switch
+            size="small"
+            checked={streamMode}
+            onChange={setStreamMode}
+            disabled={sending}
+          />
+          <Select
+            allowClear
+            placeholder="指定模型（可选）"
+            style={{ width: 150 }}
+            value={selectedModel}
+            onChange={(val) => setSelectedModel(val)}
+            options={Object.keys(models).map((name) => ({ value: name, label: name }))}
+          />
           <Select
             allowClear
             placeholder="任务类型（可选）"
-            style={{ width: 160 }}
+            style={{ width: 140 }}
             value={taskType}
             onChange={(val) => setTaskType(val)}
             options={[
@@ -155,7 +279,10 @@ export default function PlaygroundPage() {
                 color: msg.role === 'user' ? '#fff' : '#333',
                 boxShadow: msg.role === 'assistant' ? '0 1px 3px rgba(0,0,0,0.1)' : undefined,
               }}>
-                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {msg.content}
+                  {msg.streaming && <span className="cursor-blink">▌</span>}
+                </div>
                 {msg.model && (
                   <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
                     <Tag>{msg.model}</Tag>
@@ -167,7 +294,7 @@ export default function PlaygroundPage() {
             </div>
           ))
         )}
-        {sending && (
+        {sending && !streamMode && (
           <div style={{ textAlign: 'center' }}>
             <Spin size="small" />
             <Text type="secondary" style={{ marginLeft: 8 }}>AI 正在思考...</Text>
@@ -176,27 +303,72 @@ export default function PlaygroundPage() {
         <div ref={bottomRef} />
       </Card>
 
+      {/* 图片预览区 */}
+      {images.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          {images.map((dataUrl, i) => (
+            <div key={i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #d9d9d9' }}>
+              <img src={dataUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                onClick={() => handleRemoveImage(i)}
+                style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(255,255,255,0.8)' }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 输入区 */}
       <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleImageUpload}
+        />
+        <Button
+          icon={<PictureOutlined />}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={sending}
+          title="上传图片（支持多模态模型）"
+        >
+          图片
+        </Button>
         <TextArea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
           rows={3}
-          disabled={sending}
+          disabled={sending && !streamMode}
           style={{ flex: 1 }}
         />
-        <Button
-          type="primary"
-          icon={<SendOutlined />}
-          onClick={handleSend}
-          loading={sending}
-          disabled={!input.trim()}
-          style={{ height: 'auto' }}
-        >
-          发送
-        </Button>
+        {sending && streamMode ? (
+          <Button
+            danger
+            onClick={handleStop}
+            style={{ height: 'auto' }}
+          >
+            停止
+          </Button>
+        ) : (
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={handleSend}
+            loading={sending}
+            disabled={!input.trim()}
+            style={{ height: 'auto' }}
+          >
+            发送
+          </Button>
+        )}
       </div>
     </div>
   );

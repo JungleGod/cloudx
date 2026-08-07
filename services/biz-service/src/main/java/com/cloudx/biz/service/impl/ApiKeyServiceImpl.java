@@ -6,6 +6,7 @@ import com.cloudx.biz.dto.ApiKeyVO;
 import com.cloudx.biz.entity.ApiKey;
 import com.cloudx.biz.mapper.ApiKeyMapper;
 import com.cloudx.biz.service.ApiKeyService;
+import com.cloudx.biz.util.AesUtil;
 import com.cloudx.common.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,18 +25,20 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
 
     @Override
     public ApiKeyVO create(Long userId, String name) {
+        String plainSecretKey = "SK-" + Base64.getUrlEncoder().withoutPadding().encodeToString(generateRandomBytes(32));
+
         ApiKey key = new ApiKey();
         key.setUserId(userId);
         key.setAccessKey("AK-" + UUID.randomUUID().toString().replace("-", "").substring(0, 24));
-        key.setSecretKey("SK-" + Base64.getUrlEncoder().withoutPadding().encodeToString(generateRandomBytes(32)));
+        key.setSecretKey(AesUtil.encrypt(plainSecretKey)); // 加密存储
         key.setName(name);
         key.setStatus(1);
         key.setQuotaDaily(1000);
         key.setQuotaTotal(10000);
         save(key);
-        // 创建时返回完整 Secret Key
+        // 创建时返回明文 Secret Key（客户端保存后不可再获取）
         ApiKeyVO vo = toVO(key);
-        vo.setSecretKey(key.getSecretKey());
+        vo.setSecretKey(plainSecretKey);
         return vo;
     }
 
@@ -57,9 +60,11 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
 
     @Override
     public ApiKey validate(String accessKey, String secretKey) {
+        // 明文 SK 先加密再比对（DB 存的是密文）
+        String encrypted = AesUtil.encrypt(secretKey);
         ApiKey key = getOne(new LambdaQueryWrapper<ApiKey>()
                 .eq(ApiKey::getAccessKey, accessKey)
-                .eq(ApiKey::getSecretKey, secretKey)
+                .eq(ApiKey::getSecretKey, encrypted)
                 .eq(ApiKey::getStatus, 1));
         if (key == null) {
             throw new BizException(401, "API Key 无效或已禁用");

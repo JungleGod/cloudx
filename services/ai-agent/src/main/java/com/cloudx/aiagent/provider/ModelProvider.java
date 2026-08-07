@@ -11,8 +11,14 @@ public interface ModelProvider {
     /** 是否可用（有 Key 且没有熔断） */
     boolean isAvailable();
 
-    /** 发送对话请求 */
+    /** 发送对话请求（同步） */
     String chat(String message);
+
+    /** 流式对话 — 每个 token 回调一次 */
+    void streamChat(String message, StreamCallback callback);
+
+    /** 多模态对话 — 图片 + 文字 */
+    String chatMultimodal(String text, java.util.List<String> base64Images);
 
     /** 记录成功调用 */
     void recordSuccess();

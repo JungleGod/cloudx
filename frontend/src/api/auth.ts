@@ -15,13 +15,35 @@ export interface UserInfo {
   userId: number;
   username: string;
   email: string;
+  role: string;
 }
 
 export async function login(params: LoginParams) {
-  return client.post<any, { data: { token: string; userId: number; username: string } }>(
+  return client.post<any, { data: { token: string; userId: number; username: string; role: string } }>(
     '/user/login',
     params,
   );
+}
+
+export interface AdminUser {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  status: number;
+  createdAt: string;
+}
+
+export async function listUsers() {
+  return client.get<any, { data: AdminUser[] }>('/admin/users');
+}
+
+export async function setUserRole(userId: number, role: string) {
+  return client.put<any, any>(`/admin/users/${userId}/role`, { role });
+}
+
+export async function toggleUserStatus(userId: number, status: number) {
+  return client.put<any, any>(`/admin/users/${userId}/status`, { status });
 }
 
 export async function register(params: RegisterParams) {

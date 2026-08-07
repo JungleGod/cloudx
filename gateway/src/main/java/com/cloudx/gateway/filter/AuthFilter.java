@@ -77,9 +77,11 @@ public class AuthFilter implements GlobalFilter, Ordered {
                     .getPayload();
 
             // 把用户信息放到请求头，透传给下游服务
+            String role = claims.get("role", String.class);
             ServerHttpRequest modified = exchange.getRequest().mutate()
                     .header("X-User-Id", claims.getSubject())
                     .header("X-Username", claims.get("username", String.class))
+                    .header("X-User-Role", role != null ? role : "user")
                     .build();
 
             log.debug("JWT auth passed: userId={}, username={}",

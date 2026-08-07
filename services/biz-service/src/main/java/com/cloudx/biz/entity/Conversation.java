@@ -6,18 +6,14 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("sys_user")
-public class SysUser {
+@TableName("conversation")
+public class Conversation {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String username;
-    private String password;
-    private String email;
-    private String phone;
-    private Integer status;
-    /** 角色：admin / user */
-    private String role;
+    private Long userId;
+    private String title;
+    private String model;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
