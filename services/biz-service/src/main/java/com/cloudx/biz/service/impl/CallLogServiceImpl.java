@@ -2,6 +2,7 @@ package com.cloudx.biz.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.cloudx.biz.config.PricingConfig;
 import com.cloudx.biz.entity.CallLog;
 import com.cloudx.biz.mapper.CallLogMapper;
 import com.cloudx.biz.service.CallLogService;
@@ -19,12 +20,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> implements CallLogService {
 
-    /** 各模型定价：元/千token（可迁移到 Nacos 配置中心） */
-    private static final Map<String, BigDecimal[]> PRICING = Map.of(
-            "deepseek", new BigDecimal[]{new BigDecimal("0.001"), new BigDecimal("0.002")},
-            "qwen", new BigDecimal[]{new BigDecimal("0.003"), new BigDecimal("0.006")},
-            "gpt-4o", new BigDecimal[]{new BigDecimal("0.15"), new BigDecimal("0.60")}
-    );
+    private final PricingConfig pricingConfig;
 
     @Override
     public void record(Long userId, Long apiKeyId, Long interfaceId, String model,
@@ -34,8 +30,7 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
         int total = tokensInput + tokensOutput;
         BigDecimal cost = BigDecimal.ZERO;
         if (success && total > 0) {
-            BigDecimal[] prices = PRICING.getOrDefault(model.split("-")[0],
-                    new BigDecimal[]{new BigDecimal("0.001"), new BigDecimal("0.002")});
+            BigDecimal[] prices = pricingConfig.getOrDefault(model.split("-")[0]);
             cost = prices[0].multiply(new BigDecimal(tokensInput))
                     .add(prices[1].multiply(new BigDecimal(tokensOutput)))
                     .divide(new BigDecimal("1000"), 6, RoundingMode.HALF_UP);

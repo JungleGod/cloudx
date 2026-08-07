@@ -37,7 +37,7 @@ export default function AppLayout() {
   }
 
   const menuItems = [
-    { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
+    { key: '/dashboard', icon: <DashboardOutlined />, label: '概览' },
     { key: '/api-keys', icon: <KeyOutlined />, label: 'API Key' },
     { key: '/playground', icon: <ExperimentOutlined />, label: '在线调试' },
   ];

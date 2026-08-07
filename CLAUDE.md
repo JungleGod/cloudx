@@ -104,28 +104,31 @@ cloudx/
 3. ✅ ai-agent：LangChain4j 接入 DeepSeek，跑通对话（已完成 2026-08-05）
 4. ✅ ai-agent：模型路由 + 故障转移 + 负载均衡（已完成 2026-08-05）
 5. ✅ gateway：鉴权 + 限流 + 路由转发（已完成 2026-08-05）
-6. 🔲 biz-service：成本统计 + 调用量分析（代码完成+编译通过，待运行时验证 2026-08-05）
-7. ✅ frontend：React 管理控制台（日志/仪表盘/API Key/在线调试，编译通过 2026-08-05）
-8. 🔲 Nacos 配置中心：提示词模板、路由规则在线修改生效
+6. ✅ biz-service：成本统计 + 调用量分析（已验证通过 2026-08-07）
+7. ✅ frontend：React 管理控制台（已验证通过 2026-08-07）
+8. ✅ Nacos 配置中心热更新（模型配置实时生效，已完成 2026-08-07）
 9. 🔲 全链路压测，调优，确保 4C8G 下流畅
 10. 🔲 部署到腾讯云
 ```
 
 ## 当前进度
 
-- **2026-08-05**：成本统计 + 前端管理控制台完成，调整顺序前端先行以便联调可视化
-  - ✅ ai-agent：LangChain4j 接入 DeepSeek，跑通对话
-  - ✅ ai-agent：策略路由（关键词/taskType）+ 轮询负载均衡 + 熔断故障转移
-  - ✅ gateway：Spring Cloud Gateway 统一入口（8080），JWT 鉴权 + AK/SK 签名 + Redis 限流
-  - ✅ 全链路调通：客户端 → gateway(鉴权) → ai-agent(路由) → DeepSeek
-  - ✅ 成本统计（代码+编译通过）：CallLogClient → CallLogController → MySQL，stats API（today/by-model/daily）
-  - ✅ React 前端（代码+编译通过）：React 18 + Ant Design 5 + Vite + Recharts
-    - 5 个页面：登录、注册、仪表盘（统计卡片+饼图+趋势图）、API Key 管理、AI 在线调试
-    - Axios 封装（自动带 Token、统一错误处理）、AuthContext 全局认证状态
-  - 🔲 启动后端服务 + 前端，联调验证整套链路
-  - 🔲 Nacos 配置中心热更新（路由规则/提示词模板）
-  - 🔲 全链路压测，调优，确保 4C8G 下流畅
-  - 🔲 部署到腾讯云
+- **2026-08-07**：联调验证 + Nacos 热更新 + Bug 修复
+  - ✅ 全链路联调通过：前端 → gateway → biz-service/ai-agent → MySQL/Redis/Nacos
+  - ✅ Nacos 配置中心热更新：`cloudx.models` + `cloudx.pricing` 迁移到 Nacos，`ModelRouter` 监听 `RefreshScopeRefreshedEvent` 自动重建
+  - ✅ DeepSeek + 通义千问 双模型接入，互相 fallback
+  - ✅ 联调中修复的 Bug：
+    - DeepSeek 前端显示"离线"（前后端状态值不匹配：`UP` vs `online`）
+    - 仪表盘无调用数据（`api_key_id` NOT NULL 但传了 null）
+    - 在线调试切页签消息丢失（sessionStorage 持久化）
+    - 多轮对话无上下文（前端发送历史 + 后端拼入 prompt）
+    - API Key 创建后 Secret Key 从未完整展示（新增结果展示弹窗）
+    - API Key 列表接口泄露完整 Secret Key（后端脱敏：`SK-xxxx...xxxx`）
+  - 🔲 在线调试：模型选择器（用户手动选模型）
+  - 🔲 在线调试：文件/图片上传（qwen-turbo 支持多模态）
+  - 🔲 在线调试：流式输出（SSE 打字机效果）
+  - 🔲 Secret Key 加密存储（当前明文存 DB）
+  - 🔲 用户角色权限（管理员 vs 普通用户）
 
 ### 当前模块总览
 

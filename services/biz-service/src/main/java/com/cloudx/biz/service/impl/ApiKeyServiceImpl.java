@@ -33,7 +33,10 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
         key.setQuotaDaily(1000);
         key.setQuotaTotal(10000);
         save(key);
-        return toVO(key);
+        // 创建时返回完整 Secret Key
+        ApiKeyVO vo = toVO(key);
+        vo.setSecretKey(key.getSecretKey());
+        return vo;
     }
 
     @Override
@@ -68,7 +71,7 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
         return ApiKeyVO.builder()
                 .id(entity.getId())
                 .accessKey(entity.getAccessKey())
-                .secretKey(entity.getSecretKey())
+                .secretKey(maskSecret(entity.getSecretKey()))
                 .name(entity.getName())
                 .status(entity.getStatus())
                 .quotaDaily(entity.getQuotaDaily())
@@ -76,6 +79,14 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
                 .expiredAt(entity.getExpiredAt())
                 .createdAt(entity.getCreatedAt())
                 .build();
+    }
+
+    /** 脱敏 Secret Key：SK-xxxx...xxxx 仅保留前后几位用于区分 */
+    private String maskSecret(String secret) {
+        if (secret == null || secret.length() <= 12) {
+            return secret == null ? "" : secret;
+        }
+        return secret.substring(0, 8) + "..." + secret.substring(secret.length() - 5);
     }
 
     private byte[] generateRandomBytes(int length) {

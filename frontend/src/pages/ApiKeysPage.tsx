@@ -1,14 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Table, Button, Tag, Modal, Input, message, Space } from 'antd';
+import { Table, Button, Tag, Modal, Input, message, Space, Alert, Typography } from 'antd';
 import { PlusOutlined, ReloadOutlined, CopyOutlined } from '@ant-design/icons';
 import { listKeys, createKey, toggleKey, type ApiKeyVO } from '../api/keys';
 import dayjs from 'dayjs';
+
+const { Text } = Typography;
 
 export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKeyVO[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [keyName, setKeyName] = useState('');
+  const [createdKey, setCreatedKey] = useState<ApiKeyVO | null>(null);
 
   const fetchKeys = useCallback(async () => {
     setLoading(true);
@@ -28,8 +31,8 @@ export default function ApiKeysPage() {
       return;
     }
     try {
-      await createKey(keyName.trim());
-      message.success('创建成功');
+      const res = await createKey(keyName.trim());
+      setCreatedKey(res.data);
       setModalOpen(false);
       setKeyName('');
       fetchKeys();
@@ -70,7 +73,7 @@ export default function ApiKeysPage() {
       ellipsis: true,
       render: (val: string) => (
         <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
-          {val?.slice(0, 8)}...（仅创建时可见）
+          {val}（仅创建时可见）
         </span>
       ),
     },
@@ -144,6 +147,51 @@ export default function ApiKeysPage() {
           onChange={(e) => setKeyName(e.target.value)}
           style={{ marginTop: 16 }}
         />
+      </Modal>
+
+      {/* 创建成功 — 展示完整密钥 */}
+      <Modal
+        title="API Key 创建成功"
+        open={!!createdKey}
+        onCancel={() => setCreatedKey(null)}
+        footer={[
+          <Button key="done" type="primary" onClick={() => setCreatedKey(null)}>
+            我已复制，关闭
+          </Button>,
+        ]}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message="Secret Key 仅在此处完整展示一次，关闭后将无法再次查看，请立即复制保存！"
+          style={{ marginBottom: 16 }}
+        />
+        <div style={{ marginBottom: 12 }}>
+          <Text strong>Access Key</Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <code style={{ flex: 1, padding: '6px 10px', background: '#f5f5f5', borderRadius: 4, wordBreak: 'break-all' }}>
+              {createdKey?.accessKey}
+            </code>
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={() => { navigator.clipboard.writeText(createdKey?.accessKey ?? ''); message.success('已复制 Access Key'); }}
+            />
+          </div>
+        </div>
+        <div>
+          <Text strong>Secret Key</Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <code style={{ flex: 1, padding: '6px 10px', background: '#fff2f0', borderRadius: 4, wordBreak: 'break-all' }}>
+              {createdKey?.secretKey}
+            </code>
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={() => { navigator.clipboard.writeText(createdKey?.secretKey ?? ''); message.success('已复制 Secret Key'); }}
+            />
+          </div>
+        </div>
       </Modal>
     </div>
   );

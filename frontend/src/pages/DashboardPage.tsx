@@ -41,7 +41,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h2 style={{ marginBottom: 24 }}>📊 仪表盘</h2>
+      <h2 style={{ marginBottom: 24 }}>📊 数据概览</h2>
 
       {/* 今日概览卡片 */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>

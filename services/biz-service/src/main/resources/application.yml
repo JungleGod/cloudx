@@ -44,6 +44,13 @@ management:
     health:
       show-details: always
 
+# ========== 模型定价（Nacos biz-service.yaml 优先，本地作为降级兜底）==========
+cloudx:
+  pricing:
+    deepseek: [0.001, 0.002]
+    qwen: [0.003, 0.006]
+    gpt-4o: [0.15, 0.60]
+
 # 日志
 logging:
   level:

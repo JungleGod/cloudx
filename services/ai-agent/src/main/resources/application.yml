@@ -24,7 +24,7 @@ logging:
   level:
     com.cloudx: debug
 
-# ========== cloudx 多模型配置 ==========
+# ========== cloudx 多模型配置（Nacos ai-agent.yaml 优先，本地作为降级兜底）==========
 cloudx:
   models:
     - name: deepseek

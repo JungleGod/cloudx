@@ -11,10 +11,16 @@ export interface ModelStatus {
   [modelName: string]: string;
 }
 
-export async function sendMessage(message: string, taskType?: string | null) {
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export async function sendMessage(message: string, taskType?: string | null, history?: HistoryMessage[]) {
   return client.post<any, { data: ChatResult }>('/chat', {
     message,
     taskType: taskType || null,
+    history: history || [],
   });
 }
 

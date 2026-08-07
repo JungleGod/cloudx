@@ -6,9 +6,12 @@ import com.cloudx.aiagent.provider.OpenAiCompatibleProvider;
 import com.cloudx.common.exception.BizException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cloud.context.scope.refresh.RefreshScopeRefreshedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -24,6 +27,7 @@ public class ModelRouter {
     private final Map<String, ModelProvider> providers = new LinkedHashMap<>();
     private final Map<String, List<String>> tagIndex = new HashMap<>();
     private List<ModelProvider> sortedByPriority = new ArrayList<>();
+    private final AtomicInteger refreshCount = new AtomicInteger(0);
 
     public ModelRouter(ModelConfig modelConfig) {
         this.modelConfig = modelConfig;
@@ -31,6 +35,13 @@ public class ModelRouter {
 
     @PostConstruct
     public void init() {
+        refresh();
+    }
+
+    /**
+     * 重建所有 provider 和索引 — 配置变更时自动调用
+     */
+    public void refresh() {
         providers.clear();
         tagIndex.clear();
 
@@ -42,18 +53,26 @@ public class ModelRouter {
             ModelProvider provider = new OpenAiCompatibleProvider(info);
             providers.put(info.getName(), provider);
 
-            // 建立标签索引
             for (String tag : info.getTags()) {
                 tagIndex.computeIfAbsent(tag, k -> new ArrayList<>()).add(info.getName());
             }
         }
 
-        // 按优先级排序
         sortedByPriority = providers.values().stream()
                 .sorted(Comparator.comparing(p -> getConfig(p.getModelName()).getPriority()))
                 .collect(Collectors.toList());
 
-        log.info("ModelRouter initialized: {} providers, tags: {}", providers.size(), tagIndex.keySet());
+        int count = refreshCount.incrementAndGet();
+        log.info("ModelRouter refreshed (#{}): {} providers, tags: {}", count, providers.size(), tagIndex.keySet());
+    }
+
+    /**
+     * 监听 Nacos 配置刷新事件，自动重建路由表
+     */
+    @EventListener(RefreshScopeRefreshedEvent.class)
+    public void onConfigRefresh(RefreshScopeRefreshedEvent event) {
+        log.info("Detected RefreshScopeRefreshedEvent, rebuilding ModelRouter...");
+        refresh();
     }
 
     /**

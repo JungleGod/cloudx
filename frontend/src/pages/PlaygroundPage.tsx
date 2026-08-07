@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef } from 'react';
-import { Card, Input, Button, Tag, Select, Space, Spin, Alert, Typography } from 'antd';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { Card, Input, Button, Tag, Select, Space, Spin, Typography } from 'antd';
 import { SendOutlined, ClearOutlined } from '@ant-design/icons';
-import { sendMessage, getModelStatus, type ChatResult, type ModelStatus } from '../api/chat';
+import { sendMessage, getModelStatus, type ModelStatus, type HistoryMessage } from '../api/chat';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -14,13 +14,31 @@ interface Message {
 const { TextArea } = Input;
 const { Text } = Typography;
 
+const STORAGE_KEY = 'cloudx-chat-messages';
+const MAX_HISTORY = 10; // 发送最近 N 条消息作为上下文
+
+/** 从 sessionStorage 恢复消息 */
+function loadMessages(): Message[] {
+  try {
+    const saved = sessionStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function PlaygroundPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(loadMessages);
   const [input, setInput] = useState('');
   const [taskType, setTaskType] = useState<string | undefined>(undefined);
   const [sending, setSending] = useState(false);
   const [models, setModels] = useState<ModelStatus>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // 每次消息变化，持久化到 sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+  }, [messages]);
 
   useEffect(() => {
     getModelStatus()
@@ -32,16 +50,28 @@ export default function PlaygroundPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleClear = useCallback(() => {
+    setMessages([]);
+    sessionStorage.removeItem(STORAGE_KEY);
+  }, []);
+
   const handleSend = async () => {
     const msg = input.trim();
     if (!msg) return;
 
-    setMessages((prev) => [...prev, { role: 'user', content: msg }]);
+    const userMsg: Message = { role: 'user', content: msg };
+    setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setSending(true);
 
+    // 取最近 MAX_HISTORY 条作为上下文（不含刚发的这条）
+    const recent = [...messages.slice(-MAX_HISTORY)].map(m => ({
+      role: m.role,
+      content: m.content,
+    })) as HistoryMessage[];
+
     try {
-      const res = await sendMessage(msg, taskType);
+      const res = await sendMessage(msg, taskType, recent);
       const r = res.data;
       setMessages((prev) => [
         ...prev,
@@ -84,7 +114,7 @@ export default function PlaygroundPage() {
           />
           <Button
             icon={<ClearOutlined />}
-            onClick={() => setMessages([])}
+            onClick={handleClear}
             disabled={messages.length === 0}
           >
             清空
