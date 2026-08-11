@@ -1,0 +1,303 @@
+package com.cloudx.aiagent.controller;
+
+import com.cloudx.aiagent.adapter.AnthropicAdapter;
+import com.cloudx.aiagent.adapter.AnthropicAdapter.InternalRequest;
+import com.cloudx.aiagent.adapter.OpenAiAdapter;
+import com.cloudx.aiagent.dto.AnthropicDTOs;
+import com.cloudx.aiagent.dto.OpenAiDTOs;
+import com.cloudx.aiagent.dto.AnthropicDTOs.MessagesRequest;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ChatCompletionRequest;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ChatCompletionResponse;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ChatCompletionChunk;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ModelInfo;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ModelListResponse;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ErrorResponse;
+import com.cloudx.aiagent.provider.StreamCallback;
+import com.cloudx.aiagent.routing.ModelRouter.RouteResult;
+import com.cloudx.aiagent.service.ApiKeyAuthClient;
+import com.cloudx.aiagent.service.ApiKeyAuthClient.AuthResult;
+import com.cloudx.aiagent.service.ChatService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+/**
+ * 兼容 API 入口：OpenAI + Anthropic
+ */
+@Slf4j
+@RestController
+@RequiredArgsConstructor
+public class OpenAiCompatibleController {
+
+    private final ApiKeyAuthClient apiKeyAuthClient;
+    private final OpenAiAdapter openAiAdapter;
+    private final AnthropicAdapter anthropicAdapter;
+    private final ChatService chatService;
+    private final ObjectMapper objectMapper;
+
+    @PostConstruct
+    public void init() {
+        log.info("Compatible API ready: /v1/chat/completions, /v1/messages, /v1/models");
+    }
+
+    // ==================== 认证（兼容多种 Header） ====================
+
+    /**
+     * 从 x-api-key 或 Authorization 头提取 token 并验证
+     */
+    private AuthResult authenticate(
+            @RequestHeader(value = "x-api-key", required = false) String apiKey,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // 优先 x-api-key（Anthropic 标准），其次 Authorization（OpenAI 标准）
+        String token = (apiKey != null && !apiKey.isBlank()) ? apiKey : authHeader;
+        return apiKeyAuthClient.verify(token);
+    }
+
+    // ==================== /v1/chat/completions (OpenAI) ====================
+
+    @PostMapping("/v1/chat/completions")
+    public Object chatCompletions(
+            @RequestHeader(value = "x-api-key", required = false) String apiKey,
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody ChatCompletionRequest request) {
+
+        AuthResult auth = authenticate(apiKey, authHeader);
+        if (auth == null) {
+            return openAiError(401, "invalid_request_error", "Invalid API Key");
+        }
+
+        OpenAiAdapter.InternalRequest internal;
+        try {
+            internal = openAiAdapter.toInternal(request);
+        } catch (IllegalArgumentException e) {
+            return openAiError(400, "invalid_request_error", e.getMessage());
+        }
+
+        // 确定展示给客户端的模型名：传 "auto"/null 就显示 "auto"，防止客户端钉死实际模型
+        String displayModel = (request.getModel() == null || "auto".equalsIgnoreCase(request.getModel()))
+                ? "auto" : request.getModel();
+
+        if (internal.stream()) {
+            return openAiStream(internal, auth, displayModel);
+        }
+        return openAiSync(internal, auth);
+    }
+
+    private ResponseEntity<?> openAiSync(OpenAiAdapter.InternalRequest internal, AuthResult auth) {
+        String requestId = "chatcmpl-" + UUID.randomUUID().toString().substring(0, 24);
+        String fullPrompt = buildFullPrompt(internal.systemPrompt(), internal.userMessage());
+
+        RouteResult result = chatService.chat(
+                fullPrompt, internal.history(), internal.model(), null, auth.userId());
+
+        log.info("OpenAI request routed to [{}] via {}", result.model(), result.strategy());
+        return ResponseEntity.ok()
+                .header("X-Routed-Model", result.model())
+                .body(openAiAdapter.toResponseWithPrompt(result, requestId, fullPrompt, result.model()));
+    }
+
+    private SseEmitter openAiStream(OpenAiAdapter.InternalRequest internal, AuthResult auth, String displayModel) {
+        String requestId = "chatcmpl-" + UUID.randomUUID().toString().substring(0, 24);
+        SseEmitter emitter = new SseEmitter(300_000L);
+        String fullPrompt = buildFullPrompt(internal.systemPrompt(), internal.userMessage());
+
+        StreamCallback callback = new StreamCallback() {
+            private boolean firstToken = true;
+            @Override
+            public void onToken(String token) {
+                try {
+                    emitter.send(SseEmitter.event().data(
+                            openAiAdapter.toChunkJson(token, requestId, displayModel, firstToken, false),
+                            MediaType.APPLICATION_JSON));
+                    firstToken = false;
+                } catch (IOException e) { log.debug("SSE send failed"); }
+            }
+            @Override
+            public void onComplete() {
+                try {
+                    emitter.send(SseEmitter.event().data(
+                            openAiAdapter.toChunkJson(null, requestId, displayModel, false, true),
+                            MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    emitter.complete();
+                } catch (IOException e) { emitter.completeWithError(e); }
+            }
+            @Override
+            public void onError(Throwable error) {
+                log.error("Stream error: {}", error.getMessage());
+                emitter.completeWithError(error);
+            }
+        };
+
+        new Thread(() -> chatService.chatStream(
+                fullPrompt, internal.history(), internal.model(), null, auth.userId(), callback)).start();
+
+        return emitter;
+    }
+
+    // ==================== /v1/messages (Anthropic) ====================
+
+    @PostMapping("/v1/messages")
+    public Object messages(
+            @RequestHeader(value = "x-api-key", required = false) String apiKey,
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody MessagesRequest request) {
+
+        AuthResult auth = authenticate(apiKey, authHeader);
+        if (auth == null) {
+            return anthropicError(401, "authentication_error", "Invalid API Key");
+        }
+
+        InternalRequest internal;
+        try {
+            internal = anthropicAdapter.toInternal(request);
+        } catch (IllegalArgumentException e) {
+            return anthropicError(400, "invalid_request_error", e.getMessage());
+        }
+
+        // 确定展示给客户端的模型名：传 "auto"/null 就显示 "auto"，防止客户端钉死实际模型
+        String displayModel = (request.getModel() == null || "auto".equalsIgnoreCase(request.getModel()))
+                ? "auto" : request.getModel();
+
+        if (internal.stream()) {
+            return anthropicStream(internal, auth, displayModel);
+        }
+        return anthropicSync(internal, auth);
+    }
+
+    private ResponseEntity<?> anthropicSync(InternalRequest internal, AuthResult auth) {
+        String requestId = "msg_" + UUID.randomUUID().toString().substring(0, 24);
+        String fullPrompt = buildFullPrompt(internal.systemPrompt(), internal.userMessage());
+
+        RouteResult result = chatService.chat(
+                fullPrompt, internal.history(), internal.model(), null, auth.userId());
+
+        log.info("Anthropic request routed to [{}] via {}", result.model(), result.strategy());
+        return ResponseEntity.ok()
+                .header("X-Routed-Model", result.model())
+                .body(anthropicAdapter.toResponse(result, requestId, fullPrompt, result.model()));
+    }
+
+    private SseEmitter anthropicStream(InternalRequest internal, AuthResult auth, String displayModel) {
+        String requestId = "msg_" + UUID.randomUUID().toString().substring(0, 24);
+        SseEmitter emitter = new SseEmitter(300_000L);
+        String fullPrompt = buildFullPrompt(internal.systemPrompt(), internal.userMessage());
+
+        // 流式序列：message_start → content_block_start → delta × N
+        //          → content_block_stop → message_delta → message_stop
+        StreamCallback callback = new StreamCallback() {
+            private boolean started = false;
+            @Override
+            public void onToken(String token) {
+                try {
+                    if (!started) {
+                        emitter.send(SseEmitter.event()
+                                .data(anthropicAdapter.sseMessageStart(requestId, displayModel), MediaType.APPLICATION_JSON));
+                        emitter.send(SseEmitter.event()
+                                .data(anthropicAdapter.sseContentBlockStart(0), MediaType.APPLICATION_JSON));
+                        started = true;
+                    }
+                    emitter.send(SseEmitter.event()
+                            .data(anthropicAdapter.sseContentBlockDelta(0, token), MediaType.APPLICATION_JSON));
+                } catch (IOException e) { log.debug("SSE send failed"); }
+            }
+            @Override
+            public void onComplete() {
+                try {
+                    emitter.send(SseEmitter.event()
+                            .data(anthropicAdapter.sseContentBlockStop(0), MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event()
+                            .data(anthropicAdapter.sseMessageDelta(1), MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event()
+                            .data(anthropicAdapter.sseMessageStop(), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                } catch (IOException e) { emitter.completeWithError(e); }
+            }
+            @Override
+            public void onError(Throwable error) {
+                log.error("Anthropic stream error: {}", error.getMessage());
+                try {
+                    emitter.send(SseEmitter.event().data(
+                            anthropicAdapter.toJson(anthropicAdapter.toError("server_error", error.getMessage())),
+                            MediaType.APPLICATION_JSON));
+                } catch (IOException ignored) {}
+                emitter.completeWithError(error);
+            }
+        };
+
+        new Thread(() -> chatService.chatStream(
+                fullPrompt, internal.history(), internal.model(), null, auth.userId(), callback)).start();
+
+        return emitter;
+    }
+
+    // ==================== /v1/models ====================
+
+    @GetMapping("/v1/models")
+    public ResponseEntity<?> listModels(
+            @RequestHeader(value = "x-api-key", required = false) String apiKey,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+
+        AuthResult auth = authenticate(apiKey, authHeader);
+        if (auth == null) {
+            return openAiError(401, "invalid_request_error", "Invalid API Key");
+        }
+
+        Map<String, String> statusMap = chatService.modelStatus();
+        long now = System.currentTimeMillis() / 1000;
+
+        List<ModelInfo> models = statusMap.entrySet().stream()
+                .filter(e -> "UP".equals(e.getValue()))
+                .map(e -> ModelInfo.builder().id(e.getKey()).created(now).build())
+                .collect(Collectors.toList());
+
+        models.add(0, ModelInfo.builder().id("auto").created(now).build());
+
+        return ResponseEntity.ok(ModelListResponse.builder().data(models).build());
+    }
+
+    // ==================== 异常处理 ====================
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<?> handleException(Exception e) {
+        log.error("API error: {}", e.getMessage());
+        return openAiError(500, "server_error", e.getMessage());
+    }
+
+    // ==================== 私有工具方法 ====================
+
+    /** 标记：用于路由时从完整 prompt 中提取纯用户消息 */
+    static final String USER_MSG_MARKER = "\n【用户消息】\n";
+
+    private String buildFullPrompt(String systemPrompt, String userMessage) {
+        StringBuilder sb = new StringBuilder();
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            sb.append("系统指令：").append(systemPrompt).append("\n");
+        }
+        sb.append(USER_MSG_MARKER).append(userMessage);
+        return sb.toString();
+    }
+
+    private ResponseEntity<ErrorResponse> openAiError(int status, String type, String message) {
+        return ResponseEntity.status(status)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(openAiAdapter.toError(message, type, status));
+    }
+
+    private ResponseEntity<AnthropicDTOs.ErrorResponse> anthropicError(int status, String type, String message) {
+        return ResponseEntity.status(status)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(anthropicAdapter.toError(type, message));
+    }
+}

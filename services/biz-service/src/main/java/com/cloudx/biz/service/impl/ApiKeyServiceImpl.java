@@ -72,6 +72,26 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
         return key;
     }
 
+    @Override
+    public ApiKey verifyBySecretKey(String secretKey) {
+        if (secretKey == null || secretKey.isBlank()) {
+            throw new BizException(401, "API Key 不能为空");
+        }
+        // 明文 SK 加密后匹配
+        String encrypted = AesUtil.encrypt(secretKey.trim());
+        ApiKey key = getOne(new LambdaQueryWrapper<ApiKey>()
+                .eq(ApiKey::getSecretKey, encrypted)
+                .eq(ApiKey::getStatus, 1));
+        if (key == null) {
+            throw new BizException(401, "API Key 无效或已禁用");
+        }
+        // 检查过期
+        if (key.getExpiredAt() != null && key.getExpiredAt().isBefore(java.time.LocalDateTime.now())) {
+            throw new BizException(401, "API Key 已过期");
+        }
+        return key;
+    }
+
     private ApiKeyVO toVO(ApiKey entity) {
         return ApiKeyVO.builder()
                 .id(entity.getId())

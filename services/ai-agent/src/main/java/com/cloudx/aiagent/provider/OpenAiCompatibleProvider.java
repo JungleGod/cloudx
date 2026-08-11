@@ -50,6 +50,8 @@ public class OpenAiCompatibleProvider implements ModelProvider {
                 .modelName(config.getModelName())
                 .temperature(config.getTemperature())
                 .maxTokens(config.getMaxTokens())
+                .frequencyPenalty(config.getFrequencyPenalty())
+                .presencePenalty(config.getPresencePenalty())
                 .timeout(Duration.ofSeconds(config.getTimeoutSeconds()))
                 .build();
 
@@ -66,6 +68,8 @@ public class OpenAiCompatibleProvider implements ModelProvider {
                 .modelName(config.getModelName())
                 .temperature(config.getTemperature())
                 .maxTokens(config.getMaxTokens())
+                .frequencyPenalty(config.getFrequencyPenalty())
+                .presencePenalty(config.getPresencePenalty())
                 .timeout(Duration.ofSeconds(config.getTimeoutSeconds()))
                 .build();
 
@@ -100,6 +104,8 @@ public class OpenAiCompatibleProvider implements ModelProvider {
                 .modelName(config.getModelName())
                 .temperature(config.getTemperature())
                 .maxTokens(config.getMaxTokens())
+                .frequencyPenalty(config.getFrequencyPenalty())
+                .presencePenalty(config.getPresencePenalty())
                 .timeout(Duration.ofSeconds(config.getTimeoutSeconds()))
                 .build();
 

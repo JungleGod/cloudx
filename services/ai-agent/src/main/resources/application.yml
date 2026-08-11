@@ -27,30 +27,72 @@ logging:
 # ========== cloudx 多模型配置（Nacos ai-agent.yaml 优先，本地作为降级兜底）==========
 cloudx:
   models:
-    - name: deepseek
+    - name: deepseek-v4-flash
+      provider: openai-compatible
+      base-url: https://api.deepseek.com
+      model-name: deepseek-v4-flash
+      keys:
+        - ${DEEPSEEK_API_KEY:}
+      tags: [fast, coding, general, chinese]
+      priority: 1
+      max-failures: 3
+      fallback: deepseek-chat
+      temperature: 0.7
+      max-tokens: 2048
+      timeout-seconds: 60
+
+    - name: deepseek-chat
       provider: openai-compatible
       base-url: https://api.deepseek.com
       model-name: deepseek-chat
       keys:
         - ${DEEPSEEK_API_KEY:}
-      tags: [code, general, chinese]
-      priority: 1
+      tags: [coding, general, chinese, reasoning]
+      priority: 2
       max-failures: 3
-      fallback: qwen
+      fallback: qwen-turbo
       temperature: 0.7
       max-tokens: 2048
       timeout-seconds: 60
 
-    - name: qwen
+    - name: qwen-turbo
       provider: openai-compatible
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       model-name: qwen-turbo
       keys:
         - ${QWEN_API_KEY:}
-      tags: [multimodal, general, chinese]
-      priority: 2
+      tags: [fast, multimodel, general, chinese]
+      priority: 3
       max-failures: 3
-      fallback: deepseek
+      fallback: deepseek-chat
       temperature: 0.7
       max-tokens: 2048
       timeout-seconds: 60
+
+    - name: deepseek-v4-pro
+      provider: openai-compatible
+      base-url: https://api.deepseek.com
+      model-name: deepseek-v4-pro
+      keys:
+        - ${DEEPSEEK_API_KEY:}
+      tags: [coding, reasoning, complex, general, chinese]
+      priority: 4
+      max-failures: 3
+      fallback: deepseek-chat
+      temperature: 0.7
+      max-tokens: 4096
+      timeout-seconds: 120
+
+    - name: qwen-3.7-max
+      provider: openai-compatible
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      model-name: qwen-3.7-max
+      keys:
+        - ${QWEN_API_KEY:}
+      tags: [reasoning, complex, multimodel, general, chinese]
+      priority: 5
+      max-failures: 3
+      fallback: deepseek-v4-pro
+      temperature: 0.7
+      max-tokens: 4096
+      timeout-seconds: 120

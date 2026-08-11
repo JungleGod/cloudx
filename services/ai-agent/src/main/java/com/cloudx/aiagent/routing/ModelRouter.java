@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 /**
  * 模型路由器 — 根据请求内容选择最合适的模型
  * <p>
- * 路由优先级：taskType 指定 > 关键词匹配 > 默认（priority 最小）
+ * 路由优先级：用户指定 > taskType > 关键词 > AI分类 > 默认(priority)
  */
 @Slf4j
 @Component
@@ -165,7 +165,8 @@ public class ModelRouter {
         if (model != null && !model.isBlank()) return "user=" + model;
         if (taskType != null && !taskType.isBlank()) return "taskType=" + taskType;
         if (matchByKeyword(message.toLowerCase()) != null) return "keyword";
-        return "default";
+        // 关键词未命中 → 下面会走 AI 分类（select 内部），这里先标记
+        return "ai-classify";
     }
 
     /**
@@ -190,12 +191,17 @@ public class ModelRouter {
             targetModel = matchByTag(taskType.toLowerCase());
         }
 
-        // 2. 关键词匹配
+        // 2. 关键词匹配（快速路径）
         if (targetModel == null) {
             targetModel = matchByKeyword(message.toLowerCase());
         }
 
-        // 3. 默认：优先级最高的可用模型
+        // 3. AI 分类（智能路径，仅当关键词未命中时调用）
+        if (targetModel == null) {
+            targetModel = classifyByAI(message);
+        }
+
+        // 4. 默认：优先级最高的可用模型
         if (targetModel == null) {
             for (ModelProvider p : sortedByPriority) {
                 if (p.isAvailable()) {
@@ -243,13 +249,119 @@ public class ModelRouter {
     }
 
     private String matchByKeyword(String message) {
-        // 代码相关 → deepseek（代码能力强）
-        if (containsAny(message, "写代码", "debug", "java", "python", "bug", "代码", "编程", "算法", "重构")) {
-            return findAvailable("deepseek");
+        // 只对用户消息做关键词匹配，排除 buildFullPrompt 拼入的系统指令
+        String userPart = extractUserMessage(message);
+
+        // ===== 代码/编程 → 找 tagged "coding" 的模型 =====
+        if (containsAny(userPart,
+                // 中文
+                "写代码", "代码", "编程", "算法", "重构", "函数", "接口", "方法", "类",
+                // 英文动作
+                "implement", "refactor", "optimize", "compile", "deploy", "commit",
+                "merge", "review code", "unit test", "integration test",
+                // 语言/框架
+                "java", "python", "javascript", "typescript", "rust", "golang",
+                "react", "vue", "angular", "spring", "django", "flask", "express",
+                "node.js", "next.js",
+                // 技术概念
+                "api", "endpoint", "microservice", "middleware", "dependency injection",
+                "design pattern", "solid", "dry", "tdd", "oop", "functional programming",
+                "async", "await", "promise", "callback", "lambda", "stream",
+                // 数据库
+                "sql", "query", "database", "schema", "index", "transaction",
+                // 基础设施
+                "docker", "container", "kubernetes", "k8s", "ci/cd", "pipeline",
+                // 代码元素
+                "class ", "method ", "interface ", "struct ", "enum ",
+                "import ", "package ", "module ", "component ",
+                // bug/fix
+                "debug", "bug", "error", "exception", "crash", "fix", "broken")) {
+            return findByTag("coding");
         }
-        // 图片/多模态 → 找支持 multimodal 的模型
-        if (containsAny(message, "图片", "生成图", "画", "图像", "照片")) {
-            return findByTag("multimodal");
+
+        // ===== 推理/分析 → 找 tagged "reasoning" 的模型 =====
+        if (containsAny(userPart,
+                "explain why", "how does", "analyze", "compare and contrast",
+                "evaluate", "assess", "prove", "reasoning", "logical", "cause",
+                "why is", "what is the difference", "advantage", "disadvantage",
+                "tradeoff", "best practice", "recommendation", "strategy",
+                "方法论", "原理", "推导", "证明", "分析", "比较", "评估")) {
+            return findByTag("reasoning");
+        }
+
+        // ===== 多模态 → 找 tagged "multimodel" 的模型 =====
+        if (containsAny(userPart,
+                "图片", "生成图", "画", "图像", "照片", "截图",
+                "image", "picture", "photo", "screenshot", "diagram",
+                "chart", "graph", "plot", "visual", "ocr", "vision",
+                "draw", "visualize")) {
+            return findByTag("multimodel");
+        }
+
+        // ===== 创意/写作 → 普通模型即可，不做特殊路由 =====
+        // "story", "poem", "song", "creative" 等走 default，flash 够用
+
+        return null;
+    }
+
+    /** 定位标记，与 OpenAiCompatibleController.USER_MSG_MARKER 保持一致 */
+    private static final String USER_MSG_MARKER = "\n【用户消息】\n";
+
+    /** 从拼合消息中提取纯用户消息（依赖 【用户消息】 标记） */
+    private String extractUserMessage(String fullMessage) {
+        if (fullMessage == null) return "";
+        int idx = fullMessage.lastIndexOf(USER_MSG_MARKER);
+        if (idx >= 0) {
+            return fullMessage.substring(idx + USER_MSG_MARKER.length()).trim();
+        }
+        // 降级：没有标记时返回原始消息（兼容旧格式）
+        return fullMessage;
+    }
+
+    // ==================== AI 分类路由 ====================
+
+    /**
+     * 用最快的模型给用户消息分类，返回对应的 tag
+     */
+    private String classifyByAI(String message) {
+        // 只对用户消息分类，排除系统指令干扰
+        String userPart = extractUserMessage(message);
+        String sample = userPart.length() > 300 ? userPart.substring(0, 300) : userPart;
+
+        // 用最快的可用 provider 做分类
+        ModelProvider classifier = findFastestProvider();
+        if (classifier == null) return null;
+
+        String prompt = "Classify this user request into ONE word: "
+                + "code, reason, chat, write, analyze, translate, image. "
+                + "Reply with ONLY the word.\n\n"
+                + "Request: " + sample + "\n"
+                + "Category:";
+
+        try {
+            String category = classifier.chat(prompt).trim().toLowerCase();
+            log.info("AI classified as [{}] → message: {}...", category,
+                    message.length() > 50 ? message.substring(0, 50) : message);
+
+            return switch (category) {
+                case "code"     -> findByTag("coding");
+                case "reason"   -> findByTag("reasoning");
+                case "analyze"  -> findByTag("reasoning");
+                case "image"    -> findByTag("multimodel");
+                case "translate"-> findByTag("fast");
+                case "write"    -> findByTag("coding");    // 写作代码 → coding
+                default         -> null;                    // chat / 未知 → 兜底
+            };
+        } catch (Exception e) {
+            log.warn("AI classification failed, falling back: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 找最快（priority 最小）的可用 provider */
+    private ModelProvider findFastestProvider() {
+        for (ModelProvider p : sortedByPriority) {
+            if (p.isAvailable()) return p;
         }
         return null;
     }

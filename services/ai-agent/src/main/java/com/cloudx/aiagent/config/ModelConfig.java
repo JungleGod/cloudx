@@ -42,6 +42,10 @@ public class ModelConfig {
         private int maxTokens = 2048;
         /** 超时秒数 */
         private long timeoutSeconds = 60;
+        /** 频率惩罚 -2.0~2.0，正数抑制重复 token */
+        private double frequencyPenalty = 0.3;
+        /** 存在惩罚 -2.0~2.0，正数抑制已出现过的 token */
+        private double presencePenalty = 0.3;
 
         public boolean hasKeys() {
             return keys != null && !keys.isEmpty() && keys.stream().anyMatch(k -> k != null && !k.isBlank());

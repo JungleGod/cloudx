@@ -1,5 +1,7 @@
 package com.cloudx.biz.controller;
 
+import com.cloudx.biz.entity.ApiKey;
+import com.cloudx.biz.service.ApiKeyService;
 import com.cloudx.biz.service.CallLogService;
 import com.cloudx.common.result.R;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +18,7 @@ import java.util.Map;
 public class CallLogController {
 
     private final CallLogService callLogService;
+    private final ApiKeyService apiKeyService;
 
     /** 内部接口：ai-agent 记录调用日志 */
     @PostMapping("/api/internal/call-logs")
@@ -34,6 +37,17 @@ public class CallLogController {
         callLogService.record(userId, 0L, null, model,
                 requestBody, responseBody, tokensInput, tokensOutput, latencyMs, success, errorMsg);
         return R.ok();
+    }
+
+    /** 内部接口：验证 API Key（被 ai-agent 调用） */
+    @PostMapping("/api/internal/keys/verify")
+    public R<Map<String, Object>> verify(@RequestBody Map<String, String> body) {
+        String secretKey = body.get("secretKey");
+        ApiKey key = apiKeyService.verifyBySecretKey(secretKey);
+        return R.ok(Map.of(
+                "userId", key.getUserId(),
+                "keyId", key.getId()
+        ));
     }
 
     /** 今日统计 */

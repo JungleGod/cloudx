@@ -36,6 +36,18 @@ spring:
                 redis-rate-limiter.burstCapacity: 20
                 redis-rate-limiter.requestedTokens: 1
 
+        # ===== OpenAI 兼容 API（API Key 鉴权，由 ai-agent 自行处理）=====
+        - id: openai-compatible
+          uri: lb://ai-agent
+          predicates:
+            - Path=/v1/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+
         # ===== 模型状态（公开）=====
         - id: ai-agent-models
           uri: lb://ai-agent
@@ -81,7 +93,7 @@ jwt:
 # 鉴权白名单（无需 Token）
 gateway:
   auth:
-    white-list: /api/user/register,/api/user/login,/api/models,/health,/actuator/health,/api/internal/
+    white-list: /api/user/register,/api/user/login,/api/models,/health,/actuator/health,/api/internal/,/v1/
 
 # Actuator
 management:
