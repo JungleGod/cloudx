@@ -138,9 +138,11 @@ export default function PlaygroundPage() {
           onToken: (token) => {
             setMessages((prev) => {
               const updated = [...prev];
-              const last = updated[updated.length - 1];
+              const lastIdx = updated.length - 1;
+              const last = updated[lastIdx];
               if (last && last.streaming) {
-                last.content += token;
+                // 创建新对象而非修改原对象，防止 React 并发模式下的重复渲染
+                updated[lastIdx] = { ...last, content: last.content + token };
               }
               return updated;
             });
@@ -148,9 +150,10 @@ export default function PlaygroundPage() {
           onDone: () => {
             setMessages((prev) => {
               const updated = [...prev];
-              const last = updated[updated.length - 1];
+              const lastIdx = updated.length - 1;
+              const last = updated[lastIdx];
               if (last && last.streaming) {
-                last.streaming = false;
+                updated[lastIdx] = { ...last, streaming: false };
               }
               return updated;
             });
@@ -160,10 +163,14 @@ export default function PlaygroundPage() {
           onError: (error) => {
             setMessages((prev) => {
               const updated = [...prev];
-              const last = updated[updated.length - 1];
+              const lastIdx = updated.length - 1;
+              const last = updated[lastIdx];
               if (last && last.streaming) {
-                last.streaming = false;
-                if (!last.content) last.content = `请求失败: ${error}`;
+                updated[lastIdx] = {
+                  ...last,
+                  streaming: false,
+                  content: last.content || `请求失败: ${error}`,
+                };
               }
               return updated;
             });

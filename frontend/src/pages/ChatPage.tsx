@@ -186,9 +186,10 @@ export default function ChatPage() {
             fullContent += token;
             setMessages((prev) => {
               const updated = [...prev];
-              const last = updated[updated.length - 1];
+              const lastIdx = updated.length - 1;
+              const last = updated[lastIdx];
               if (last && last.streaming) {
-                last.content += token;
+                updated[lastIdx] = { ...last, content: last.content + token };
               }
               return updated;
             });
@@ -196,9 +197,10 @@ export default function ChatPage() {
           onDone: () => {
             setMessages((prev) => {
               const updated = [...prev];
-              const last = updated[updated.length - 1];
+              const lastIdx = updated.length - 1;
+              const last = updated[lastIdx];
               if (last && last.streaming) {
-                last.streaming = false;
+                updated[lastIdx] = { ...last, streaming: false };
               }
               return updated;
             });
@@ -210,10 +212,14 @@ export default function ChatPage() {
           onError: (error) => {
             setMessages((prev) => {
               const updated = [...prev];
-              const last = updated[updated.length - 1];
+              const lastIdx = updated.length - 1;
+              const last = updated[lastIdx];
               if (last && last.streaming) {
-                last.streaming = false;
-                if (!last.content) last.content = `请求失败: ${error}`;
+                updated[lastIdx] = {
+                  ...last,
+                  streaming: false,
+                  content: last.content || `请求失败: ${error}`,
+                };
               }
               return updated;
             });
@@ -268,10 +274,14 @@ export default function ChatPage() {
     setSending(false);
     setMessages((prev) => {
       const updated = [...prev];
-      const last = updated[updated.length - 1];
+      const lastIdx = updated.length - 1;
+      const last = updated[lastIdx];
       if (last && last.streaming) {
-        last.streaming = false;
-        if (!last.content) last.content = '(已中止)';
+        updated[lastIdx] = {
+          ...last,
+          streaming: false,
+          content: last.content || '(已中止)',
+        };
       }
       return updated;
     });
