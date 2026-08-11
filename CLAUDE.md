@@ -190,3 +190,7 @@ cloudx/
 - 每个 Java 进程设 -Xmx 256m（biz-service、ai-agent、gateway 共 3 个 = 768m）
 - MySQL ≈ 400m、Redis ≈ 50m、Nacos ≈ 256m、Nginx ≈ 20m
 - 合计约 1.5G，日常 4C8G 绰绰有余
+
+## 项目惯例
+
+遇到值得记录的 bug 或踩坑，写入 `docs/issues/` 文件夹（编号 + 标题），作为项目经验积累。
