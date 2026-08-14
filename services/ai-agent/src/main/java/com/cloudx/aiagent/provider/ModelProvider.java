@@ -25,4 +25,10 @@ public interface ModelProvider {
 
     /** 记录失败调用，返回是否应熔断 */
     boolean recordFailure();
+
+    /** 当前连续失败次数 */
+    int getFailureCount();
+
+    /** 熔断器状态: CLOSED / OPEN / HALF_OPEN */
+    String getCircuitState();
 }

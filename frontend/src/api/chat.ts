@@ -8,7 +8,22 @@ export interface ChatResult {
 }
 
 export interface ModelStatus {
-  [modelName: string]: string;
+  [modelName: string]: string; // 兼容旧格式
+}
+
+/** 模型详细信息（v2） */
+export interface ModelDetail {
+  name: string;
+  status: string;           // UP / DOWN
+  circuit: string;           // CLOSED / OPEN / HALF_OPEN
+  failures: number;
+  baseUrl: string;
+  tags: string[];
+  fallback: string;
+  priority: number;
+  maxTokens: number;
+  timeoutSeconds: number;
+  keyCount: number;
 }
 
 export interface HistoryMessage {
@@ -136,5 +151,5 @@ export async function sendMessageMultimodal(
 }
 
 export async function getModelStatus() {
-  return client.get<any, { data: ModelStatus }>('/models');
+  return client.get<any, { data: ModelDetail[] }>('/models');
 }

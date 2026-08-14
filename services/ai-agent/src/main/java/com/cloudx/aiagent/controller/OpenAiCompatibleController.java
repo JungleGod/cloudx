@@ -3,6 +3,10 @@ package com.cloudx.aiagent.controller;
 import com.cloudx.aiagent.adapter.AnthropicAdapter;
 import com.cloudx.aiagent.adapter.AnthropicAdapter.InternalRequest;
 import com.cloudx.aiagent.adapter.OpenAiAdapter;
+import com.cloudx.aiagent.agent.AgentExecutionContext;
+import com.cloudx.aiagent.agent.AgentMessage;
+import com.cloudx.aiagent.agent.AgentResult;
+import com.cloudx.aiagent.agent.AgentStreamCallback;
 import com.cloudx.aiagent.dto.AnthropicDTOs;
 import com.cloudx.aiagent.dto.OpenAiDTOs;
 import com.cloudx.aiagent.dto.AnthropicDTOs.MessagesRequest;
@@ -12,8 +16,13 @@ import com.cloudx.aiagent.dto.OpenAiDTOs.ChatCompletionChunk;
 import com.cloudx.aiagent.dto.OpenAiDTOs.ModelInfo;
 import com.cloudx.aiagent.dto.OpenAiDTOs.ModelListResponse;
 import com.cloudx.aiagent.dto.OpenAiDTOs.ErrorResponse;
+import com.cloudx.aiagent.dto.OpenAiDTOs.Message;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ToolDef;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ToolCallDelta;
+import com.cloudx.aiagent.dto.OpenAiDTOs.ToolCallFunctionDelta;
 import com.cloudx.aiagent.provider.StreamCallback;
 import com.cloudx.aiagent.routing.ModelRouter.RouteResult;
+import com.cloudx.aiagent.service.AgentService;
 import com.cloudx.aiagent.service.ApiKeyAuthClient;
 import com.cloudx.aiagent.service.ApiKeyAuthClient.AuthResult;
 import com.cloudx.aiagent.service.ChatService;
@@ -27,9 +36,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -44,6 +51,7 @@ public class OpenAiCompatibleController {
     private final OpenAiAdapter openAiAdapter;
     private final AnthropicAdapter anthropicAdapter;
     private final ChatService chatService;
+    private final AgentService agentService;
     private final ObjectMapper objectMapper;
 
     @PostConstruct
@@ -77,6 +85,11 @@ public class OpenAiCompatibleController {
             return openAiError(401, "invalid_request_error", "Invalid API Key");
         }
 
+        // 检测是否带 tools → Agent 模式
+        if (request.getTools() != null && !request.getTools().isEmpty()) {
+            return handleAgentRequest(request, auth);
+        }
+
         OpenAiAdapter.InternalRequest internal;
         try {
             internal = openAiAdapter.toInternal(request);
@@ -92,6 +105,162 @@ public class OpenAiCompatibleController {
             return openAiStream(internal, auth, displayModel);
         }
         return openAiSync(internal, auth);
+    }
+
+    // ==================== Agent 模式处理 ====================
+
+    /** 带 tools 的请求走 Agent 循环 */
+    private Object handleAgentRequest(ChatCompletionRequest request, AuthResult auth) {
+        // 构建 Agent 执行上下文
+        AgentExecutionContext ctx = openAiAdapter.toAgentContext(request, auth);
+
+        boolean stream = request.getStream() != null && request.getStream();
+        String displayModel = (request.getModel() == null || "auto".equalsIgnoreCase(request.getModel()))
+                ? "auto" : request.getModel();
+
+        if (stream) {
+            return agentStream(ctx, auth, displayModel, request.getMessages());
+        }
+        return agentSync(ctx, auth, displayModel);
+    }
+
+    /** Agent 同步执行 → OpenAI 格式响应 */
+    private ResponseEntity<?> agentSync(AgentExecutionContext ctx, AuthResult auth, String displayModel) {
+        String requestId = "chatcmpl-" + UUID.randomUUID().toString().substring(0, 24);
+        AgentResult result = agentService.execute(ctx);
+
+        return ResponseEntity.ok()
+                .header("X-Routed-Model", displayModel)
+                .body(openAiAdapter.toAgentResponse(result, requestId, displayModel));
+    }
+
+    /** Agent 流式执行 → SSE */
+    private SseEmitter agentStream(AgentExecutionContext ctx, AuthResult auth,
+                                    String displayModel, List<Message> requestMessages) {
+        String requestId = "chatcmpl-" + UUID.randomUUID().toString().substring(0, 24);
+        SseEmitter emitter = new SseEmitter(300_000L);
+
+        AgentStreamCallback callback = new AgentStreamCallback() {
+            private final long created = System.currentTimeMillis() / 1000;
+            private boolean firstToken = true;
+            private final StringBuilder fullContent = new StringBuilder();
+            // 累积 tool_call delta 状态
+            private final Map<Integer, String> toolCallIds = new LinkedHashMap<>();
+            private final Map<Integer, String> toolCallNames = new LinkedHashMap<>();
+            private final Map<Integer, StringBuilder> toolCallArgs = new LinkedHashMap<>();
+
+            @Override
+            public void onThinking() { /* SSE 客户端不需要额外事件 */ }
+
+            @Override
+            public void onToolCallStart(String toolName, String callId) {
+                // 记录 tool_call 信息，待 delta 时发送
+            }
+
+            @Override
+            public void onToolCallArgs(String callId, String delta) {
+                // 找到对应的 tool_call index
+                int idx = -1;
+                for (Map.Entry<Integer, String> e : toolCallIds.entrySet()) {
+                    if (callId.equals(e.getValue())) { idx = e.getKey(); break; }
+                }
+                if (idx < 0) {
+                    idx = toolCallIds.size();
+                    toolCallIds.put(idx, callId);
+                }
+                toolCallArgs.computeIfAbsent(idx, k -> new StringBuilder()).append(delta);
+            }
+
+            @Override
+            public void onToolCallExecuting(String toolName, String arguments) {
+                // 同步所有已知 tool_call 信息
+                for (int idx : toolCallIds.keySet()) {
+                    toolCallNames.putIfAbsent(idx, toolName);
+                }
+            }
+
+            @Override
+            public void onToolResult(String toolName, String result, boolean success, long elapsedMs) {
+                // 工具结果不在 SSE chunk 中发送（客户端从 toolSteps 获取）
+            }
+
+            @Override
+            public void onToken(String token) {
+                fullContent.append(token);
+                try {
+                    Map<String, Object> chunk = buildAgentChunk(requestId, displayModel, token,
+                            false, null, null);
+                    emitter.send(SseEmitter.event().data(
+                            objectMapper.writeValueAsString(chunk), MediaType.APPLICATION_JSON));
+                    firstToken = false;
+                } catch (IOException e) { log.debug("SSE send failed"); }
+            }
+
+            @Override
+            public void onDone(String fullReply) {
+                try {
+                    // 如果有 tool_calls，先发送带 tool_calls 的 chunk
+                    if (!toolCallIds.isEmpty()) {
+                        List<Map<String, Object>> toolCalls = new ArrayList<>();
+                        for (int idx : toolCallIds.keySet()) {
+                            Map<String, Object> fn = new LinkedHashMap<>();
+                            fn.put("name", toolCallNames.getOrDefault(idx, ""));
+                            fn.put("arguments", toolCallArgs.containsKey(idx)
+                                    ? toolCallArgs.get(idx).toString() : "");
+                            Map<String, Object> tc = new LinkedHashMap<>();
+                            tc.put("id", toolCallIds.get(idx));
+                            tc.put("type", "function");
+                            tc.put("function", fn);
+                            toolCalls.add(tc);
+                        }
+                        Map<String, Object> chunk = buildAgentChunk(requestId, displayModel, null,
+                                true, "tool_calls", toolCalls);
+                        emitter.send(SseEmitter.event().data(
+                                objectMapper.writeValueAsString(chunk), MediaType.APPLICATION_JSON));
+                    }
+                    // 发送最终 stop chunk
+                    Map<String, Object> finalChunk = buildAgentChunk(requestId, displayModel, null,
+                            true, "stop", null);
+                    emitter.send(SseEmitter.event().data(
+                            objectMapper.writeValueAsString(finalChunk), MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    emitter.complete();
+                } catch (IOException e) { emitter.completeWithError(e); }
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                log.error("Agent stream error: {}", error.getMessage());
+                emitter.completeWithError(error);
+            }
+        };
+
+        new Thread(() -> agentService.executeStream(ctx, callback)).start();
+        return emitter;
+    }
+
+    /** 构建 Agent 模式的流式 chunk */
+    private Map<String, Object> buildAgentChunk(String requestId, String model, String content,
+                                                  boolean isLast, String finishReason,
+                                                  List<Map<String, Object>> toolCalls) {
+        long created = System.currentTimeMillis() / 1000;
+        Map<String, Object> chunk = new LinkedHashMap<>();
+        chunk.put("id", requestId);
+        chunk.put("object", "chat.completion.chunk");
+        chunk.put("created", created);
+        chunk.put("model", model);
+
+        Map<String, Object> delta = new LinkedHashMap<>();
+        if (content != null) delta.put("content", content);
+        if (toolCalls != null) delta.put("tool_calls", toolCalls);
+
+        Map<String, Object> choice = new LinkedHashMap<>();
+        choice.put("index", 0);
+        choice.put("delta", delta);
+        if (finishReason != null) choice.put("finish_reason", finishReason);
+
+        chunk.put("choices", List.of(choice));
+        return chunk;
     }
 
     private ResponseEntity<?> openAiSync(OpenAiAdapter.InternalRequest internal, AuthResult auth) {
@@ -254,12 +423,12 @@ public class OpenAiCompatibleController {
             return openAiError(401, "invalid_request_error", "Invalid API Key");
         }
 
-        Map<String, String> statusMap = chatService.modelStatus();
+        List<Map<String, Object>> statusList = chatService.modelStatus();
         long now = System.currentTimeMillis() / 1000;
 
-        List<ModelInfo> models = statusMap.entrySet().stream()
-                .filter(e -> "UP".equals(e.getValue()))
-                .map(e -> ModelInfo.builder().id(e.getKey()).created(now).build())
+        List<ModelInfo> models = statusList.stream()
+                .filter(m -> "UP".equals(m.get("status")))
+                .map(m -> ModelInfo.builder().id((String) m.get("name")).created(now).build())
                 .collect(Collectors.toList());
 
         models.add(0, ModelInfo.builder().id("auto").created(now).build());

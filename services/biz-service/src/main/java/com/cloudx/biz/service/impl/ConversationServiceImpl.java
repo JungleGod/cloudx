@@ -40,6 +40,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
                     .id(conv.getId())
                     .title(conv.getTitle())
                     .model(conv.getModel())
+                    .agentId(conv.getAgentId())
                     .messageCount((int) msgCount)
                     .createdAt(conv.getCreatedAt())
                     .updatedAt(conv.getUpdatedAt())
@@ -50,15 +51,23 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
     @Override
     @Transactional
     public ConversationVO create(Long userId, String title, String model) {
+        return create(userId, title, model, null);
+    }
+
+    @Override
+    @Transactional
+    public ConversationVO create(Long userId, String title, String model, Long agentId) {
         Conversation conv = new Conversation();
         conv.setUserId(userId);
         conv.setTitle(title != null && !title.isBlank() ? title : "新对话");
         conv.setModel(model);
+        conv.setAgentId(agentId);
         save(conv);
         return ConversationVO.builder()
                 .id(conv.getId())
                 .title(conv.getTitle())
                 .model(conv.getModel())
+                .agentId(conv.getAgentId())
                 .messageCount(0)
                 .createdAt(conv.getCreatedAt())
                 .updatedAt(conv.getUpdatedAt())

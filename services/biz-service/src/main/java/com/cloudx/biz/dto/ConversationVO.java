@@ -12,6 +12,7 @@ public class ConversationVO {
     private Long id;
     private String title;
     private String model;
+    private Long agentId;
     private Integer messageCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

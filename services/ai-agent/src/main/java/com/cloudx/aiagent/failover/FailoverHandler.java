@@ -18,7 +18,7 @@ public class FailoverHandler {
     /** 半开状态等待时间（毫秒） */
     private static final long HALF_OPEN_DELAY_MS = 30_000;
 
-    private enum State {
+    public enum State {
         CLOSED, OPEN, HALF_OPEN
     }
 
@@ -64,6 +64,10 @@ public class FailoverHandler {
 
     public int getConsecutiveFailures() {
         return consecutiveFailures.get();
+    }
+
+    public int getMaxFailures() {
+        return maxFailures;
     }
 
     public State getState() {

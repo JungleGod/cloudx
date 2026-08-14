@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Card, Input, Button, Tag, Select, Space, Typography, Switch, Layout } from 'antd';
-import { SendOutlined, ThunderboltOutlined, PictureOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons';
+import { Card, Input, Button, Tag, Select, Space, Typography, Switch, Layout, Tabs } from 'antd';
+import { SendOutlined, ThunderboltOutlined, PictureOutlined, DeleteOutlined, FileTextOutlined, RobotOutlined, MessageOutlined } from '@ant-design/icons';
 import * as pdfjsLib from 'pdfjs-dist';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-import { sendMessage, sendMessageStream, sendMessageMultimodal, getModelStatus, type ModelStatus, type HistoryMessage } from '../api/chat';
+import { sendMessage, sendMessageStream, sendMessageMultimodal, getModelStatus, type ModelDetail, type HistoryMessage } from '../api/chat';
 import {
   listConversations,
   createConversation,
@@ -14,6 +14,7 @@ import {
   type ConversationMessage,
 } from '../api/conversation';
 import ConversationSidebar from '../components/ConversationSidebar';
+import AgentPage from './AgentPage';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -53,6 +54,13 @@ export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
 
+  // Agent 对话状态
+  const [agentConversations, setAgentConversations] = useState<Conversation[]>([]);
+  const [agentActiveConv, setAgentActiveConv] = useState<Conversation | null>(null);
+
+  // Tab 切换：对话 | Agent
+  const [activeTab, setActiveTab] = useState<'chat' | 'agent'>('chat');
+
   // 聊天状态
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -60,7 +68,7 @@ export default function ChatPage() {
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const [sending, setSending] = useState(false);
   const [streamMode, setStreamMode] = useState(true);
-  const [models, setModels] = useState<ModelStatus>({});
+  const [models, setModels] = useState<ModelDetail[]>([]);
   const [images, setImages] = useState<string[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -81,6 +89,15 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // 加载 Agent 对话列表
+  const loadAgentConversations = () => {
+    listConversations()
+      .then((list) => setAgentConversations(list.filter((c) => c.agentId != null)))
+      .catch(() => {});
+  };
+
+  useEffect(() => { loadAgentConversations(); }, []);
+
   /** 新建会话 */
   const handleCreate = useCallback(() => {
     setActiveConv(null);
@@ -88,6 +105,17 @@ export default function ChatPage() {
     setInput('');
     inputRef.current?.focus();
   }, []);
+
+  /** 新建 Agent 会话 */
+  const handleAgentCreate = useCallback(() => {
+    setAgentActiveConv(null);
+  }, []);
+
+  /** 切换 Agent 会话 */
+  const handleAgentSelect = useCallback(async (conv: Conversation) => {
+    if (!conv) { handleAgentCreate(); return; }
+    setAgentActiveConv(conv);
+  }, [handleAgentCreate]);
 
   /** 切换会话 */
   const handleSelect = useCallback(async (conv: Conversation) => {
@@ -264,7 +292,9 @@ export default function ChatPage() {
 
   /** 刷新会话列表（异步，不阻塞） */
   const refreshList = () => {
-    listConversations().then(setConversations).catch(() => {});
+    listConversations()
+      .then((list) => setConversations(list.filter((c) => c.agentId == null)))
+      .catch(() => {});
   };
 
   /** 停止流式输出 */
@@ -374,210 +404,254 @@ export default function ChatPage() {
 
   return (
     <Layout style={{ height: 'calc(100vh - 200px)', background: 'transparent' }}>
-      {/* 左侧会话列表 */}
-      <Sider width={SIDEBAR_WIDTH} style={{ background: '#fff', borderRadius: 8, padding: 12, marginRight: 16, overflow: 'auto' }}>
-        <ConversationSidebar
-          activeId={activeConv?.id ?? null}
-          onSelect={handleSelect}
-          onCreate={handleCreate}
-          conversations={conversations}
-          setConversations={setConversations}
+      {/* 左侧：会话列表 + Tab 切换 */}
+      <Sider width={SIDEBAR_WIDTH} style={{ background: '#fff', borderRadius: 8, padding: 0, marginRight: 16, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key as 'chat' | 'agent')}
+          size="small"
+          centered
+          style={{ padding: '0 12px' }}
+          items={[
+            {
+              key: 'chat',
+              label: <span><MessageOutlined /> 对话</span>,
+            },
+            {
+              key: 'agent',
+              label: <span><RobotOutlined /> Agent</span>,
+            },
+          ]}
         />
+        {activeTab === 'chat' && (
+          <div style={{ padding: '0 12px 12px', flex: 1, overflow: 'auto' }}>
+            <ConversationSidebar
+              activeId={activeConv?.id ?? null}
+              onSelect={handleSelect}
+              onCreate={handleCreate}
+              conversations={conversations}
+              setConversations={setConversations}
+              filter={(list) => list.filter((c) => c.agentId == null)}
+            />
+          </div>
+        )}
+        {activeTab === 'agent' && (
+          <div style={{ padding: '0 12px 12px', flex: 1, overflow: 'auto' }}>
+            <ConversationSidebar
+              activeId={agentActiveConv?.id ?? null}
+              onSelect={handleAgentSelect}
+              onCreate={handleAgentCreate}
+              conversations={agentConversations}
+              setConversations={setAgentConversations}
+              filter={(list) => list.filter((c) => c.agentId != null)}
+            />
+          </div>
+        )}
       </Sider>
 
-      {/* 右侧聊天区 */}
+      {/* 右侧内容区 */}
       <Content style={{ display: 'flex', flexDirection: 'column' }}>
-        {/* 顶部控制栏 */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-          <h2 style={{ margin: 0 }}>
-            {activeConv ? activeConv.title : '新对话'}
-          </h2>
-          <Space>
-            <span style={{ fontSize: 13, color: '#666' }}>
-              <ThunderboltOutlined /> 流式输出
-            </span>
-            <Switch
-              size="small"
-              checked={streamMode}
-              onChange={setStreamMode}
-              disabled={sending}
-            />
-            <Select
-              allowClear
-              placeholder="指定模型"
-              style={{ width: 140 }}
-              value={selectedModel}
-              onChange={(val) => setSelectedModel(val)}
-              options={Object.keys(models).map((name) => ({ value: name, label: name }))}
-            />
-            <Select
-              allowClear
-              placeholder="任务类型"
-              style={{ width: 120 }}
-              value={taskType}
-              onChange={(val) => setTaskType(val)}
-              options={[
-                { value: 'code', label: '代码' },
-                { value: 'translate', label: '翻译' },
-                { value: 'chat', label: '闲聊' },
-                { value: 'math', label: '数学' },
-              ]}
-            />
-          </Space>
-        </div>
-
-        {/* 模型状态 */}
-        <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {Object.entries(models).map(([name, status]) => (
-            <Tag key={name} color={status === 'UP' ? 'green' : 'red'}>
-              {name} · {status === 'UP' ? '在线' : '离线'}
-            </Tag>
-          ))}
-          {Object.keys(models).length === 0 && (
-            <Text type="secondary">模型状态加载中...</Text>
-          )}
-        </div>
-
-        {/* 聊天区 */}
-        <Card style={{ flex: 1, overflow: 'auto', marginBottom: 16, background: '#fafafa' }}>
-          {messages.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#999', padding: 48 }}>
-              发送一条消息开始对话
-            </div>
-          ) : (
-            messages.map((msg, i) => (
-              <div key={i} style={{
-                marginBottom: 16,
-                display: 'flex',
-                justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              }}>
-                <div style={{
-                  maxWidth: '80%',
-                  padding: '10px 16px',
-                  borderRadius: 12,
-                  background: msg.role === 'user' ? '#1677ff' : '#fff',
-                  color: msg.role === 'user' ? '#fff' : '#333',
-                  boxShadow: msg.role === 'assistant' ? '0 1px 3px rgba(0,0,0,0.1)' : undefined,
-                }}>
-                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {msg.content}
-                    {msg.streaming && <span className="cursor-blink">▌</span>}
-                  </div>
-                  {msg.model && (
-                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-                      <Tag>{msg.model}</Tag>
-                      {msg.failover && <Tag color="orange">故障转移</Tag>}
-                      {msg.strategy && <span> — {msg.strategy}</span>}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-          <div ref={bottomRef} />
-        </Card>
-
-        {/* 图片预览区 */}
-        {images.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-            {images.map((dataUrl, i) => (
-              <div key={i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #d9d9d9' }}>
-                <img src={dataUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                <Button
-                  type="text"
-                  danger
+        {activeTab === 'agent' ? (
+          <AgentPage
+            activeConv={agentActiveConv}
+            onConvMutated={loadAgentConversations}
+            onAgentChange={() => {}}
+          />
+        ) : (
+          <>
+            {/* 顶部控制栏 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>
+                {activeConv ? activeConv.title : '新对话'}
+              </h2>
+              <Space>
+                <span style={{ fontSize: 13, color: '#666' }}>
+                  <ThunderboltOutlined /> 流式输出
+                </span>
+                <Switch
                   size="small"
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleRemoveImage(i)}
-                  style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(255,255,255,0.8)' }}
+                  checked={streamMode}
+                  onChange={setStreamMode}
+                  disabled={sending}
                 />
+                <Select
+                  allowClear
+                  placeholder="指定模型"
+                  style={{ width: 140 }}
+                  value={selectedModel}
+                  onChange={(val) => setSelectedModel(val)}
+                  options={models.map((m) => ({ value: m.name, label: m.name }))}
+                />
+                <Select
+                  allowClear
+                  placeholder="任务类型"
+                  style={{ width: 120 }}
+                  value={taskType}
+                  onChange={(val) => setTaskType(val)}
+                  options={[
+                    { value: 'code', label: '代码' },
+                    { value: 'translate', label: '翻译' },
+                    { value: 'chat', label: '闲聊' },
+                    { value: 'math', label: '数学' },
+                  ]}
+                />
+              </Space>
+            </div>
+
+            {/* 模型状态 */}
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {models.map((m) => (
+                <Tag key={m.name} color={m.status === 'UP' ? 'green' : 'red'}>
+                  {m.name} · {m.status === 'UP' ? '在线' : '离线'}
+                </Tag>
+              ))}
+              {models.length === 0 && (
+                <Text type="secondary">模型状态加载中...</Text>
+              )}
+            </div>
+
+            {/* 聊天区 */}
+            <Card style={{ flex: 1, overflow: 'auto', marginBottom: 16, background: '#fafafa' }}>
+              {messages.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#999', padding: 48 }}>
+                  发送一条消息开始对话
+                </div>
+              ) : (
+                messages.map((msg, i) => (
+                  <div key={i} style={{
+                    marginBottom: 16,
+                    display: 'flex',
+                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                  }}>
+                    <div style={{
+                      maxWidth: '80%',
+                      padding: '10px 16px',
+                      borderRadius: 12,
+                      background: msg.role === 'user' ? '#1677ff' : '#fff',
+                      color: msg.role === 'user' ? '#fff' : '#333',
+                      boxShadow: msg.role === 'assistant' ? '0 1px 3px rgba(0,0,0,0.1)' : undefined,
+                    }}>
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {msg.content}
+                        {msg.streaming && <span className="cursor-blink">▌</span>}
+                      </div>
+                      {msg.model && (
+                        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+                          <Tag>{msg.model}</Tag>
+                          {msg.failover && <Tag color="orange">故障转移</Tag>}
+                          {msg.strategy && <span> — {msg.strategy}</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+              <div ref={bottomRef} />
+            </Card>
+
+            {/* 图片预览区 */}
+            {images.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                {images.map((dataUrl, i) => (
+                  <div key={i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #d9d9d9' }}>
+                    <img src={dataUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <Button
+                      type="text"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleRemoveImage(i)}
+                      style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(255,255,255,0.8)' }}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
 
-        {/* 附件预览区 */}
-        {attachedFiles.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-            {attachedFiles.map((file, i) => (
-              <Tag
-                key={i}
-                closable
-                onClose={() => handleRemoveFile(i)}
-                color="blue"
-                style={{ margin: 0, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
-              >
-                <FileTextOutlined />
-                <span>{file.name}</span>
-                <span style={{ opacity: 0.6, fontSize: 11 }}>({formatSize(file.size)})</span>
-              </Tag>
-            ))}
-          </div>
-        )}
+            {/* 附件预览区 */}
+            {attachedFiles.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                {attachedFiles.map((file, i) => (
+                  <Tag
+                    key={i}
+                    closable
+                    onClose={() => handleRemoveFile(i)}
+                    color="blue"
+                    style={{ margin: 0, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <FileTextOutlined />
+                    <span>{file.name}</span>
+                    <span style={{ opacity: 0.6, fontSize: 11 }}>({formatSize(file.size)})</span>
+                  </Tag>
+                ))}
+              </div>
+            )}
 
-        {/* 输入区 */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: 'none' }}
-            onChange={handleImageUpload}
-          />
-          <input
-            ref={docInputRef}
-            type="file"
-            accept=".txt,.md,.json,.csv,.xml,.yaml,.yml,.java,.py,.js,.ts,.tsx,.jsx,.html,.css,.sql,.log,.properties,.env,.sh,.bat,.c,.cpp,.h,.hpp,.rs,.go,.rb,.php,.vue,.svelte,.kt,.swift,.scala,.gradle,.toml,.ini,.cfg,.pdf"
-            multiple
-            style={{ display: 'none' }}
-            onChange={handleFileUpload}
-          />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignSelf: 'stretch' }}>
-            <Button
-              icon={<PictureOutlined />}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={sending}
-              style={{ flex: 1 }}
-            >
-              图片
-            </Button>
-            <Button
-              icon={<FileTextOutlined />}
-              onClick={() => docInputRef.current?.click()}
-              disabled={sending}
-              style={{ flex: 1 }}
-            >
-              附件
-            </Button>
-          </div>
-          <TextArea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
-            rows={3}
-            disabled={sending && !streamMode}
-            style={{ flex: 1 }}
-          />
-          {sending && streamMode ? (
-            <Button danger onClick={handleStop} style={{ height: 'auto' }}>
-              停止
-            </Button>
-          ) : (
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSend}
-              loading={sending}
-              disabled={!input.trim()}
-              style={{ height: 'auto' }}
-            >
-              发送
-            </Button>
-          )}
-        </div>
+            {/* 输入区 */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleImageUpload}
+              />
+              <input
+                ref={docInputRef}
+                type="file"
+                accept=".txt,.md,.json,.csv,.xml,.yaml,.yml,.java,.py,.js,.ts,.tsx,.jsx,.html,.css,.sql,.log,.properties,.env,.sh,.bat,.c,.cpp,.h,.hpp,.rs,.go,.rb,.php,.vue,.svelte,.kt,.swift,.scala,.gradle,.toml,.ini,.cfg,.pdf"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleFileUpload}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignSelf: 'stretch' }}>
+                <Button
+                  icon={<PictureOutlined />}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sending}
+                  style={{ flex: 1 }}
+                >
+                  图片
+                </Button>
+                <Button
+                  icon={<FileTextOutlined />}
+                  onClick={() => docInputRef.current?.click()}
+                  disabled={sending}
+                  style={{ flex: 1 }}
+                >
+                  附件
+                </Button>
+              </div>
+              <TextArea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
+                rows={3}
+                disabled={sending && !streamMode}
+                style={{ flex: 1 }}
+              />
+              {sending && streamMode ? (
+                <Button danger onClick={handleStop} style={{ height: 'auto' }}>
+                  停止
+                </Button>
+              ) : (
+                <Button
+                  type="primary"
+                  icon={<SendOutlined />}
+                  onClick={handleSend}
+                  loading={sending}
+                  disabled={!input.trim()}
+                  style={{ height: 'auto' }}
+                >
+                  发送
+                </Button>
+              )}
+            </div>
+          </>
+        )}
       </Content>
     </Layout>
   );

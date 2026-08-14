@@ -426,7 +426,35 @@ public class ModelRouter {
         }
     }
 
-    public Map<String, String> getProviderStatus() {
+    /** 返回每个模型的详细状态信息（名称、状态、供应商、标签、熔断、回退等） */
+    public List<Map<String, Object>> getProviderStatus() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ModelProvider p : providers.values()) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("name", p.getModelName());
+            detail.put("status", p.isAvailable() ? "UP" : "DOWN");
+            detail.put("circuit", p.getCircuitState());
+            detail.put("failures", p.getFailureCount());
+
+            // 模型配置信息
+            if (p instanceof OpenAiCompatibleProvider ocp) {
+                ModelConfig.ModelInfo cfg = ocp.getConfig();
+                detail.put("baseUrl", cfg.getBaseUrl());
+                detail.put("tags", cfg.getTags());
+                detail.put("fallback", cfg.getFallback() != null ? cfg.getFallback() : "无");
+                detail.put("priority", cfg.getPriority());
+                detail.put("maxTokens", cfg.getMaxTokens());
+                detail.put("timeoutSeconds", cfg.getTimeoutSeconds());
+                detail.put("keyCount", cfg.getKeys() != null ? cfg.getKeys().size() : 0);
+            }
+            list.add(detail);
+        }
+        return list;
+    }
+
+    /** @deprecated 使用 {@link #getProviderStatus()} 获取详细信息 */
+    @Deprecated
+    public Map<String, String> getProviderStatusLegacy() {
         Map<String, String> status = new LinkedHashMap<>();
         for (ModelProvider p : providers.values()) {
             status.put(p.getModelName(), p.isAvailable() ? "UP" : "DOWN");

@@ -6,15 +6,21 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("conversation")
-public class Conversation {
+@TableName("agent_definition")
+public class AgentDefinition {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
-    private String title;
+
+    private String name;
+    private String description;
+    private String systemPrompt;
     private String model;
-    private Long agentId;
+    private Double temperature;
+    private Integer maxTokens;
+    private Integer maxIterations;
+    private Integer status;
+    private Long createdBy;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

@@ -141,7 +141,7 @@ public class ChatController {
     }
 
     @GetMapping("/models")
-    public R<Map<String, String>> models() {
+    public R<List<Map<String, Object>>> models() {
         return R.ok(chatService.modelStatus());
     }
 

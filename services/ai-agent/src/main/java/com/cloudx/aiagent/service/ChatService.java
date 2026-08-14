@@ -143,7 +143,7 @@ public class ChatService {
         return result;
     }
 
-    public Map<String, String> modelStatus() {
+    public List<Map<String, Object>> modelStatus() {
         return modelRouter.getProviderStatus();
     }
 }

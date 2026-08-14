@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Card, Input, Button, Tag, Select, Space, Spin, Typography, Switch } from 'antd';
 import { SendOutlined, ClearOutlined, ThunderboltOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons';
-import { sendMessage, sendMessageStream, sendMessageMultimodal, getModelStatus, type ModelStatus, type HistoryMessage } from '../api/chat';
+import { sendMessage, sendMessageStream, sendMessageMultimodal, getModelStatus, type ModelDetail, type HistoryMessage } from '../api/chat';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -34,7 +34,7 @@ export default function PlaygroundPage() {
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const [sending, setSending] = useState(false);
   const [streamMode, setStreamMode] = useState(true); // 默认开启流式
-  const [models, setModels] = useState<ModelStatus>({});
+  const [models, setModels] = useState<ModelDetail[]>([]);
   const [images, setImages] = useState<string[]>([]); // base64 data URLs
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
@@ -228,7 +228,7 @@ export default function PlaygroundPage() {
             style={{ width: 150 }}
             value={selectedModel}
             onChange={(val) => setSelectedModel(val)}
-            options={Object.keys(models).map((name) => ({ value: name, label: name }))}
+            options={models.map((m) => ({ value: m.name, label: m.name }))}
           />
           <Select
             allowClear
@@ -255,12 +255,12 @@ export default function PlaygroundPage() {
 
       {/* 模型状态 */}
       <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {Object.entries(models).map(([name, status]) => (
-          <Tag key={name} color={status === 'UP' ? 'green' : 'red'}>
-            {name} · {status === 'UP' ? '在线' : '离线'}
+        {models.map((m) => (
+          <Tag key={m.name} color={m.status === 'UP' ? 'green' : 'red'}>
+            {m.name} · {m.status === 'UP' ? '在线' : '离线'}
           </Tag>
         ))}
-        {Object.keys(models).length === 0 && (
+        {models.length === 0 && (
           <Text type="secondary">模型状态加载中...</Text>
         )}
       </div>

@@ -14,6 +14,7 @@ public class ConversationMessage {
     private Long conversationId;
     private String role;
     private String content;
+    private String metadata;
     private String model;
     private Integer tokens;
 

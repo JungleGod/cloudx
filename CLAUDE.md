@@ -108,11 +108,42 @@ cloudx/
 7. ✅ frontend：React 管理控制台（已验证通过 2026-08-07）
 8. ✅ Nacos 配置中心热更新（模型配置实时生效，已完成 2026-08-07）
 9. ✅ 多会话系统 + 文件上传 + 上下文修复 + 流式日志（已完成 2026-08-07）
-10. 🔲 全链路压测，调优，确保 4C8G 下流畅
-10. 🔲 部署到腾讯云
+10. ✅ Agent 对话持久化 + 专业 Agent 拆分（2026-08-12）
+11. 🔲 AgentOrchestrator 自动编排（通用助手调度子 Agent）
+12. 🔲 第三方 Agent 接入（MCP/tool_definition http 类别）
+13. 🔲 全链路压测，调优，确保 4C8G 下流畅
+14. 🔲 部署到腾讯云
 ```
 
 ## 当前进度
+
+- **2026-08-12**：Agent 对话持久化 + Agent 拆分 + 架构讨论
+  - ✅ Agent 对话持久化：AgentPage 改为受控组件，ChatPage 统一管理所有对话状态，ConversationSidebar 加 filter 属性支持数据隔离
+  - ✅ 数据隔离修复：conversation 表新增 `agent_id` 列（迁移未执行导致 bug），GET /api/conversations 现在返回 agentId
+  - ✅ 历史表格修复：conversation_message 新增 `metadata TEXT` 列，AgentPage 在 onDone 时序列化 toolSteps 存 metadata，加载历史时解析恢复，解决 Agent 回复表格刷新后变乱
+  - ✅ Agent 拆分：从「系统助手」拆出两个专业 Agent：
+    - **用户信息助手**（id=2）：get_user_count / get_daily_stats / get_my_usage
+    - **模型信息助手**（id=3）：get_model_status
+  - ✅ Agent 架构讨论：通用助手（L0 核心引擎）→ 调度子 Agent（L1 内置 / L2 自定义+第三方），与 Claude Code 架构一致
+  - ✅ 第三方 Agent 接入方案：本质是 tool_definition 注册（category=http/internal-api），通用助手无感知调用
+  - 🔲 biz-service 需重启（实体新增 agentId + metadata 字段待生效）
+  - 🔲 AgentOrchestrator 自动编排（通用助手自己决策+调度子 Agent）
+
+- **2026-08-11（下午）**：Agent 系统实现 + 联调
+  - ✅ ReAct 循环：AgentLoop 自己实现（非 LangChain4j AiServices），完全控制迭代深度和工具调度
+  - ✅ 工具系统：built-in / http / internal-api 三种类别，DB 配置 + 热加载 + 角色过滤
+  - ✅ 权限控制：工具定义 required_role（public/user/admin），ToolRegistry 按角色过滤
+  - ✅ 流式工具调用：SSE 事件（thinking/tool_call_start/tool_call_args/tool_call_executing/tool_result/token/done）
+  - ✅ OpenAI 兼容 API 集成：/v1/chat/completions 识别 tools 参数自动走 Agent 循环
+  - ✅ 审计日志：agent_execution_log 表 + @Async 异步写入
+  - ✅ 5 个内置种子工具：get_user_count(user) / get_daily_stats(user) / get_api_key_count(admin) / get_model_status(public) / get_my_usage(user)
+  - ✅ 前端：ChatPage 左侧新增「对话 | Agent」Tab，AgentPage 独立工作区，工具调用可折叠查看
+  - ✅ DB 乱码修复：最终用 UNHEX('E7B3...') 直接写入原始 UTF-8 字节，绕过所有编码层。教训：Windows 下 MySQL 中文写入优先用 UNHEX 方案
+  - 数据库新增 4 张表：agent_definition / tool_definition / agent_tool_binding / agent_execution_log
+  - 后端新增 20+ 文件（ai-agent agent/tool 层 + biz-service 实体/服务层）
+  - 面试亮点：自己实现 ReAct 循环、流式 tool_call delta 解析、角色控权、审计日志、OpenAI 协议兼容
+  - ✅ 服务重启后 Agent 列表正确显示「系统助手」（中文不乱码）
+  - 🔲 Agent 执行报错「请求失败」，需排查 AgentLoop 执行链路
 
 - **2026-08-07（晚间）**：登录页重设计 + Git 安全修复
   - ✅ 登录/注册页重设计：参考阿里云风格，左右分栏布局，左侧深色品牌区（CSS 手绘控制台插画 + 产品介绍），右侧白色表单卡片
@@ -153,13 +184,14 @@ cloudx/
 | Nacos | 8848 | 注册中心+配置中心 | 🟢 |
 | gateway | 8080 | 统一入口、JWT鉴权、路由转发、Redis限流 | 🟢 |
 | biz-service | 8081 | 用户注册/登录、API Key管理、调用日志、成本统计 | 🟢 |
-| ai-agent | 9090 | DeepSeek对话、模型路由、负载均衡、故障转移 | 🟢 |
+| ai-agent | 9090 | DeepSeek对话、模型路由、负载均衡、故障转移、Agent 工具调用 | 🟢 |
 
 ### 调用链路
 
 ```
 客户端 → gateway:8080 (JWT鉴权→限流)
            ├─→ /api/chat → ai-agent:9090 (ModelRouter→LoadBalancer→DeepSeek)
+           ├─→ /api/agents/** → ai-agent:9090 (AgentLoop→ToolExecutor→BuiltIn/HTTP/Internal)
            ├─→ /api/user/** → biz-service:8081
            ├─→ /api/keys/** → biz-service:8081
            ├─→ /api/stats/** → biz-service:8081
@@ -180,6 +212,8 @@ cloudx/
 - 多模型统一调用：适配器模式 + LangChain4j，新模型只加配置不改代码
 - 微服务设计：为什么拆成 biz-service 和 ai-agent，各自职责边界
 - AI 工程化：AI 不只调 API，而是完整的调度、容错、监控体系
+- Agent 架构：通用助手（L0）+ 专业 Agent（L1）+ 自定义/第三方（L2），与 Claude Code 同构
+- 第三方集成：tool_definition 注册即接入，通用助手无感知调用，类 MCP 协议思想
 
 ---
 

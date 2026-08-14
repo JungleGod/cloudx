@@ -32,10 +32,11 @@ public class ConversationController {
     /** 创建新会话 */
     @PostMapping
     public R<ConversationVO> create(@RequestHeader("X-User-Id") Long userId,
-                                    @RequestBody Map<String, String> body) {
-        String title = body.getOrDefault("title", "新对话");
-        String model = body.getOrDefault("model", null);
-        return R.ok(conversationService.create(userId, title, model));
+                                    @RequestBody Map<String, Object> body) {
+        String title = body.getOrDefault("title", "新对话").toString();
+        String model = body.get("model") != null ? body.get("model").toString() : null;
+        Long agentId = body.get("agentId") != null ? Long.valueOf(body.get("agentId").toString()) : null;
+        return R.ok(conversationService.create(userId, title, model, agentId));
     }
 
     /** 更新会话（标题） */

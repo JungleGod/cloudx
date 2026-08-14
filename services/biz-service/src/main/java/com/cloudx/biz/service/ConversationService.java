@@ -15,6 +15,9 @@ public interface ConversationService extends IService<Conversation> {
     /** 创建新会话 */
     ConversationVO create(Long userId, String title, String model);
 
+    /** 创建新会话（带 agentId） */
+    ConversationVO create(Long userId, String title, String model, Long agentId);
+
     /** 更新会话标题 */
     void updateTitle(Long userId, Long conversationId, String title);
 

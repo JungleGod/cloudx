@@ -4,6 +4,7 @@ export interface Conversation {
   id: number;
   title: string;
   model: string | null;
+  agentId: number | null;
   messageCount: number;
   createdAt: string;
   updatedAt: string;
@@ -14,6 +15,7 @@ export interface ConversationMessage {
   conversationId?: number;
   role: 'user' | 'assistant';
   content: string;
+  metadata?: string | null;
   model?: string | null;
   tokens?: number | null;
   createdAt?: string;
@@ -26,8 +28,8 @@ export async function listConversations(): Promise<Conversation[]> {
 }
 
 /** 创建新会话 */
-export async function createConversation(title?: string, model?: string): Promise<Conversation> {
-  const res = await client.post<any, { data: Conversation }>('/conversations', { title, model });
+export async function createConversation(title?: string, model?: string, agentId?: number): Promise<Conversation> {
+  const res = await client.post<any, { data: Conversation }>('/conversations', { title, model, agentId });
   return res.data;
 }
 
@@ -50,7 +52,7 @@ export async function getMessages(conversationId: number): Promise<ConversationM
 /** 追加一条消息 */
 export async function appendMessage(
   conversationId: number,
-  msg: { role: string; content: string; model?: string | null; tokens?: number | null },
+  msg: { role: string; content: string; metadata?: string | null; model?: string | null; tokens?: number | null },
 ): Promise<void> {
   await client.post(`/conversations/${conversationId}/messages`, msg);
 }

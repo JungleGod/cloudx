@@ -72,6 +72,18 @@ spring:
           predicates:
             - Path=/api/user/**,/api/keys/**,/api/stats/**,/api/conversations/**
 
+        # ===== Agent API =====
+        - id: ai-agent-agents
+          uri: lb://ai-agent
+          predicates:
+            - Path=/api/agents/**
+
+        # ===== 管理员工具 API =====
+        - id: ai-agent-admin-tools
+          uri: lb://ai-agent
+          predicates:
+            - Path=/api/admin/tools/**
+
         # ===== 管理员接口（需鉴权）=====
         - id: biz-admin
           uri: lb://biz-service

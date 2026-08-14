@@ -134,4 +134,19 @@ public class OpenAiCompatibleProvider implements ModelProvider {
         }
         return tripped;
     }
+
+    @Override
+    public int getFailureCount() {
+        return failoverHandler.getConsecutiveFailures();
+    }
+
+    @Override
+    public String getCircuitState() {
+        return failoverHandler.getState().name();
+    }
+
+    /** 暴露配置信息供外部查询 */
+    public ModelConfig.ModelInfo getConfig() {
+        return config;
+    }
 }

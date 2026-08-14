@@ -17,9 +17,11 @@ interface Props {
   onCreate: () => void;
   conversations: Conversation[];
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>;
+  /** 可选过滤器 — 加载全部对话后过滤，用于 chat/agent 数据隔离 */
+  filter?: (list: Conversation[]) => Conversation[];
 }
 
-export default function ConversationSidebar({ activeId, onSelect, onCreate, conversations, setConversations }: Props) {
+export default function ConversationSidebar({ activeId, onSelect, onCreate, conversations, setConversations, filter }: Props) {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -31,7 +33,7 @@ export default function ConversationSidebar({ activeId, onSelect, onCreate, conv
   const loadList = async () => {
     try {
       const list = await listConversations();
-      setConversations(list);
+      setConversations(filter ? filter(list) : list);
     } catch {
       // ignore
     } finally {
