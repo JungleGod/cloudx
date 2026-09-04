@@ -38,3 +38,6 @@ application-local.yml
 # Misc
 *.tmp
 *.bak
+
+# Claude Code
+CLAUDE.md
