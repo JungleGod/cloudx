@@ -97,7 +97,12 @@ public class AgentController {
     public ResponseEntity<?> executeAgent(@RequestBody AgentExecuteRequest request) {
         AgentExecutionContext ctx = buildContext(request);
         AgentResult result = agentService.execute(ctx);
-        return ResponseEntity.ok(toResponseMap(result));
+        // 统一返回体 {code, msg, data}，与前端 axios 拦截器约定一致
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "msg", "success",
+                "data", toResponseMap(result)
+        ));
     }
 
     /**
