@@ -92,8 +92,8 @@ CREATE TABLE IF NOT EXISTS agent_execution_log (
 
 -- ===== 种子数据：内置工具 =====
 INSERT INTO tool_definition (name, description, category, parameters_schema, builtin_handler, required_role) VALUES
-('get_user_count',     '查询系统注册用户总数',                    'built-in', '{"type":"object","properties":{},"required":[]}',  'getUserCountHandler',    'user'),
-('get_daily_stats',    '获取今日API调用统计（总调用量、活跃用户数、总费用）', 'built-in', '{"type":"object","properties":{},"required":[]}',  'getDailyStatsHandler',   'user'),
+('get_user_count',     '查询系统注册用户总数',                    'built-in', '{"type":"object","properties":{},"required":[]}',  'getUserCountHandler',    'admin'),
+('get_daily_stats',    '获取今日API调用统计（总调用量、活跃用户数、总费用）', 'built-in', '{"type":"object","properties":{},"required":[]}',  'getDailyStatsHandler',   'admin'),
 ('get_api_key_count',  '获取系统中的API Key总数',                'built-in', '{"type":"object","properties":{},"required":[]}',  'getApiKeyCountHandler',  'admin'),
 ('get_model_status',   '查看当前哪些AI模型在线可用',              'built-in', '{"type":"object","properties":{},"required":[]}',  'getModelStatusHandler',  'public'),
 ('get_my_usage',       '获取当前登录用户的今日API调用量和使用情况', 'built-in', '{"type":"object","properties":{},"required":[]}',  'getMyUsageHandler',      'user');
