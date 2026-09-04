@@ -14,9 +14,9 @@ public interface CallLogService extends IService<CallLog> {
     /** 今日统计 */
     java.util.Map<String, Object> statsToday(Long userId);
 
-    /** 按模型统计（近 N 天） */
-    java.util.List<java.util.Map<String, Object>> statsByModel(int days);
+    /** 按模型统计（近 N 天，userId 为 null 表示全平台） */
+    java.util.List<java.util.Map<String, Object>> statsByModel(int days, Long userId);
 
-    /** 每日统计（近 N 天） */
-    java.util.List<java.util.Map<String, Object>> statsDaily(int days);
+    /** 每日统计（近 N 天，userId 为 null 表示全平台） */
+    java.util.List<java.util.Map<String, Object>> statsDaily(int days, Long userId);
 }

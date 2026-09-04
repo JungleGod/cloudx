@@ -66,11 +66,15 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
     }
 
     @Override
-    public List<Map<String, Object>> statsByModel(int days) {
+    public List<Map<String, Object>> statsByModel(int days, Long userId) {
         LocalDateTime start = LocalDate.now().minusDays(days).atStartOfDay();
-        List<CallLog> logs = list(new LambdaQueryWrapper<CallLog>()
+        LambdaQueryWrapper<CallLog> q = new LambdaQueryWrapper<CallLog>()
                 .ge(CallLog::getCreatedAt, start)
-                .eq(CallLog::getStatus, "success"));
+                .eq(CallLog::getStatus, "success");
+        if (userId != null) {
+            q.eq(CallLog::getUserId, userId);
+        }
+        List<CallLog> logs = list(q);
 
         Map<String, List<CallLog>> grouped = new LinkedHashMap<>();
         for (CallLog log : logs) {
@@ -91,7 +95,7 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
     }
 
     @Override
-    public List<Map<String, Object>> statsDaily(int days) {
+    public List<Map<String, Object>> statsDaily(int days, Long userId) {
         List<Map<String, Object>> result = new ArrayList<>();
         for (int i = days - 1; i >= 0; i--) {
             LocalDate date = LocalDate.now().minusDays(i);
@@ -100,6 +104,9 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
             LambdaQueryWrapper<CallLog> q = new LambdaQueryWrapper<CallLog>()
                     .between(CallLog::getCreatedAt, start, end)
                     .eq(CallLog::getStatus, "success");
+            if (userId != null) {
+                q.eq(CallLog::getUserId, userId);
+            }
 
             Map<String, Object> item = aggregate(q);
             item.put("date", date.toString());

@@ -3,6 +3,7 @@ package com.cloudx.biz.controller;
 import com.cloudx.biz.entity.*;
 import com.cloudx.biz.mapper.SysUserMapper;
 import com.cloudx.biz.service.*;
+import com.cloudx.biz.util.JwtUtil;
 import com.cloudx.common.result.R;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ public class CallLogController {
     private final ToolDefinitionService toolDefService;
     private final AgentExecutionLogService execLogService;
     private final SysUserMapper sysUserMapper;
+    private final JwtUtil jwtUtil;
 
     // ==================== 内部统计 API ====================
 
@@ -155,20 +157,41 @@ public class CallLogController {
 
     /** 今日统计 */
     @GetMapping("/api/stats/today")
-    public R<Map<String, Object>> today(@RequestParam(required = false) Long userId) {
-        return R.ok(callLogService.statsToday(userId));
+    public R<Map<String, Object>> today(@RequestHeader(value = "Authorization", required = false) String authHeader,
+                                        @RequestParam(required = false) Long userId) {
+        return R.ok(callLogService.statsToday(resolveStatsUserId(authHeader, userId)));
     }
 
     /** 按模型统计 */
     @GetMapping("/api/stats/by-model")
-    public R<List<Map<String, Object>>> byModel(@RequestParam(defaultValue = "7") int days) {
-        return R.ok(callLogService.statsByModel(days));
+    public R<List<Map<String, Object>>> byModel(@RequestHeader(value = "Authorization", required = false) String authHeader,
+                                                @RequestParam(required = false) Long userId,
+                                                @RequestParam(defaultValue = "7") int days) {
+        return R.ok(callLogService.statsByModel(days, resolveStatsUserId(authHeader, userId)));
     }
 
     /** 每日统计 */
     @GetMapping("/api/stats/daily")
-    public R<List<Map<String, Object>>> daily(@RequestParam(defaultValue = "30") int days) {
-        return R.ok(callLogService.statsDaily(days));
+    public R<List<Map<String, Object>>> daily(@RequestHeader(value = "Authorization", required = false) String authHeader,
+                                              @RequestParam(required = false) Long userId,
+                                              @RequestParam(defaultValue = "30") int days) {
+        return R.ok(callLogService.statsDaily(days, resolveStatsUserId(authHeader, userId)));
+    }
+
+    /**
+     * 解析统计接口的用户过滤条件：
+     * - 前端经 gateway 带 JWT：admin 返回 null（看全平台），普通用户返回自己的 userId
+     * - 内部服务直连（ai-agent → biz-service，无 JWT）：沿用显式 userId 参数（null = 全局）
+     */
+    private Long resolveStatsUserId(String authHeader, Long userId) {
+        if (authHeader != null && !authHeader.isBlank()) {
+            String token = authHeader.replace("Bearer ", "");
+            if ("admin".equals(jwtUtil.getRole(token))) {
+                return null;
+            }
+            return jwtUtil.getUserId(token);
+        }
+        return userId;
     }
 
     private Long toLong(Object obj) {
