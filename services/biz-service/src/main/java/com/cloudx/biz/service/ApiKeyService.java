@@ -19,4 +19,7 @@ public interface ApiKeyService extends IService<ApiKey> {
 
     /** 校验 AK/SK，返回对应的 ApiKey */
     ApiKey validate(String accessKey, String secretKey);
+
+    /** 仅通过 SecretKey 验证（用于 OpenAI 兼容 API 的 Bearer Token 认证） */
+    ApiKey verifyBySecretKey(String secretKey);
 }

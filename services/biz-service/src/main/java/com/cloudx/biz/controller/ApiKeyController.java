@@ -32,7 +32,7 @@ public class ApiKeyController {
 
     @PutMapping("/{id}/toggle")
     public R<Void> toggle(@RequestHeader("Authorization") String authHeader,
-                          @PathVariable Long id,
+                          @PathVariable("id") Long id,
                           @RequestBody Map<String, Boolean> body) {
         apiKeyService.toggleStatus(getUserId(authHeader), id, body.getOrDefault("enable", true));
         return R.ok();

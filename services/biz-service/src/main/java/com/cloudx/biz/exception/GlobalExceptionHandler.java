@@ -1,13 +1,11 @@
-package com.cloudx.common.exception;
+package com.cloudx.biz.exception;
 
+import com.cloudx.common.exception.BizException;
 import com.cloudx.common.result.R;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/**
- * 全局异常处理
- */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {

@@ -32,7 +32,12 @@ docker-compose.override.yml
 node_modules/
 dist/
 .env.local
+.env
+application-local.yml
 
 # Misc
 *.tmp
 *.bak
+
+# Claude Code
+CLAUDE.md
