@@ -16,6 +16,8 @@ public class SysUser {
     private String email;
     private String phone;
     private Integer status;
+    /** 角色：admin / user */
+    private String role;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

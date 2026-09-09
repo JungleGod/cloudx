@@ -6,6 +6,7 @@ import com.cloudx.biz.dto.ApiKeyVO;
 import com.cloudx.biz.entity.ApiKey;
 import com.cloudx.biz.mapper.ApiKeyMapper;
 import com.cloudx.biz.service.ApiKeyService;
+import com.cloudx.biz.util.AesUtil;
 import com.cloudx.common.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,16 +25,21 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
 
     @Override
     public ApiKeyVO create(Long userId, String name) {
+        String plainSecretKey = "SK-" + Base64.getUrlEncoder().withoutPadding().encodeToString(generateRandomBytes(32));
+
         ApiKey key = new ApiKey();
         key.setUserId(userId);
         key.setAccessKey("AK-" + UUID.randomUUID().toString().replace("-", "").substring(0, 24));
-        key.setSecretKey("SK-" + Base64.getUrlEncoder().withoutPadding().encodeToString(generateRandomBytes(32)));
+        key.setSecretKey(AesUtil.encrypt(plainSecretKey)); // 加密存储
         key.setName(name);
         key.setStatus(1);
         key.setQuotaDaily(1000);
         key.setQuotaTotal(10000);
         save(key);
-        return toVO(key);
+        // 创建时返回明文 Secret Key（客户端保存后不可再获取）
+        ApiKeyVO vo = toVO(key);
+        vo.setSecretKey(plainSecretKey);
+        return vo;
     }
 
     @Override
@@ -54,12 +60,34 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
 
     @Override
     public ApiKey validate(String accessKey, String secretKey) {
+        // 明文 SK 先加密再比对（DB 存的是密文）
+        String encrypted = AesUtil.encrypt(secretKey);
         ApiKey key = getOne(new LambdaQueryWrapper<ApiKey>()
                 .eq(ApiKey::getAccessKey, accessKey)
-                .eq(ApiKey::getSecretKey, secretKey)
+                .eq(ApiKey::getSecretKey, encrypted)
                 .eq(ApiKey::getStatus, 1));
         if (key == null) {
             throw new BizException(401, "API Key 无效或已禁用");
+        }
+        return key;
+    }
+
+    @Override
+    public ApiKey verifyBySecretKey(String secretKey) {
+        if (secretKey == null || secretKey.isBlank()) {
+            throw new BizException(401, "API Key 不能为空");
+        }
+        // 明文 SK 加密后匹配
+        String encrypted = AesUtil.encrypt(secretKey.trim());
+        ApiKey key = getOne(new LambdaQueryWrapper<ApiKey>()
+                .eq(ApiKey::getSecretKey, encrypted)
+                .eq(ApiKey::getStatus, 1));
+        if (key == null) {
+            throw new BizException(401, "API Key 无效或已禁用");
+        }
+        // 检查过期
+        if (key.getExpiredAt() != null && key.getExpiredAt().isBefore(java.time.LocalDateTime.now())) {
+            throw new BizException(401, "API Key 已过期");
         }
         return key;
     }
@@ -68,7 +96,7 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
         return ApiKeyVO.builder()
                 .id(entity.getId())
                 .accessKey(entity.getAccessKey())
-                .secretKey(entity.getSecretKey())
+                .secretKey(maskSecret(entity.getSecretKey()))
                 .name(entity.getName())
                 .status(entity.getStatus())
                 .quotaDaily(entity.getQuotaDaily())
@@ -76,6 +104,14 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
                 .expiredAt(entity.getExpiredAt())
                 .createdAt(entity.getCreatedAt())
                 .build();
+    }
+
+    /** 脱敏 Secret Key：SK-xxxx...xxxx 仅保留前后几位用于区分 */
+    private String maskSecret(String secret) {
+        if (secret == null || secret.length() <= 12) {
+            return secret == null ? "" : secret;
+        }
+        return secret.substring(0, 8) + "..." + secret.substring(secret.length() - 5);
     }
 
     private byte[] generateRandomBytes(int length) {

@@ -21,14 +21,20 @@ public class JwtUtil {
         this.expiration = expiration;
     }
 
-    public String generate(Long userId, String username) {
+    public String generate(Long userId, String username, String role) {
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim("username", username)
+                .claim("role", role != null ? role : "user")
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(key)
                 .compact();
+    }
+
+    public String getRole(String token) {
+        Object role = parse(token).get("role");
+        return role != null ? role.toString() : "user";
     }
 
     public Claims parse(String token) {

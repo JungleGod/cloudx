@@ -34,6 +34,7 @@ public class UserController {
         String token = authHeader.replace("Bearer ", "");
         SysUser user = userService.currentUser(token);
         return R.ok(Map.of("userId", user.getId(), "username", user.getUsername(),
+                "role", user.getRole() != null ? user.getRole() : "user",
                 "email", user.getEmail() != null ? user.getEmail() : ""));
     }
 }
