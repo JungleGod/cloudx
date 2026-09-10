@@ -2,10 +2,11 @@ package com.cloudx.biz.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.cloudx.biz.config.PricingConfig;
 import com.cloudx.biz.entity.CallLog;
 import com.cloudx.biz.mapper.CallLogMapper;
 import com.cloudx.biz.service.CallLogService;
+import com.cloudx.biz.service.ModelConfigService;
+import com.cloudx.biz.service.QuotaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +21,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> implements CallLogService {
 
-    private final PricingConfig pricingConfig;
+    private final ModelConfigService modelConfigService;
+    private final QuotaService quotaService;
 
     @Override
     public void record(Long userId, Long apiKeyId, Long interfaceId, String model,
@@ -30,7 +32,7 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
         int total = tokensInput + tokensOutput;
         BigDecimal cost = BigDecimal.ZERO;
         if (success && total > 0) {
-            BigDecimal[] prices = pricingConfig.getOrDefault(model.split("-")[0]);
+            BigDecimal[] prices = modelConfigService.getPrices(model);
             cost = prices[0].multiply(new BigDecimal(tokensInput))
                     .add(prices[1].multiply(new BigDecimal(tokensOutput)))
                     .divide(new BigDecimal("1000"), 6, RoundingMode.HALF_UP);
@@ -51,6 +53,11 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
         log.setStatus(success ? "success" : "fail");
         log.setErrorMsg(errorMsg);
         save(log);
+
+        // 成功且产生费用时，累加到用户本月额度计数器
+        if (success && cost.signum() > 0) {
+            quotaService.addUsage(userId, cost);
+        }
     }
 
     @Override

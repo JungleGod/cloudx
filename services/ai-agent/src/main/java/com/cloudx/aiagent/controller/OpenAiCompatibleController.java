@@ -26,6 +26,8 @@ import com.cloudx.aiagent.service.AgentService;
 import com.cloudx.aiagent.service.ApiKeyAuthClient;
 import com.cloudx.aiagent.service.ApiKeyAuthClient.AuthResult;
 import com.cloudx.aiagent.service.ChatService;
+import com.cloudx.aiagent.service.QuotaClient;
+import com.cloudx.common.exception.QuotaExceededException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +54,7 @@ public class OpenAiCompatibleController {
     private final AnthropicAdapter anthropicAdapter;
     private final ChatService chatService;
     private final AgentService agentService;
+    private final QuotaClient quotaClient;
     private final ObjectMapper objectMapper;
 
     @PostConstruct
@@ -83,6 +86,13 @@ public class OpenAiCompatibleController {
         AuthResult auth = authenticate(apiKey, authHeader);
         if (auth == null) {
             return openAiError(401, "invalid_request_error", "Invalid API Key");
+        }
+
+        // 月度额度校验（API Key 调用同样受限于用户额度）
+        try {
+            quotaClient.checkQuota(auth.userId());
+        } catch (QuotaExceededException e) {
+            return openAiError(429, "insufficient_quota", e.getMessage());
         }
 
         // 检测是否带 tools → Agent 模式
@@ -293,7 +303,7 @@ public class OpenAiCompatibleController {
                 } catch (IOException e) { log.debug("SSE send failed"); }
             }
             @Override
-            public void onComplete() {
+            public void onComplete(int inputTokens, int outputTokens) {
                 try {
                     emitter.send(SseEmitter.event().data(
                             openAiAdapter.toChunkJson(null, requestId, displayModel, false, true),
@@ -326,6 +336,13 @@ public class OpenAiCompatibleController {
         AuthResult auth = authenticate(apiKey, authHeader);
         if (auth == null) {
             return anthropicError(401, "authentication_error", "Invalid API Key");
+        }
+
+        // 月度额度校验
+        try {
+            quotaClient.checkQuota(auth.userId());
+        } catch (QuotaExceededException e) {
+            return anthropicError(429, "rate_limit_error", e.getMessage());
         }
 
         InternalRequest internal;
@@ -382,7 +399,7 @@ public class OpenAiCompatibleController {
                 } catch (IOException e) { log.debug("SSE send failed"); }
             }
             @Override
-            public void onComplete() {
+            public void onComplete(int inputTokens, int outputTokens) {
                 try {
                     emitter.send(SseEmitter.event()
                             .data(anthropicAdapter.sseContentBlockStop(0), MediaType.APPLICATION_JSON));

@@ -22,6 +22,7 @@ public class CallLogController {
     private final AgentDefinitionService agentDefService;
     private final ToolDefinitionService toolDefService;
     private final AgentExecutionLogService execLogService;
+    private final QuotaService quotaService;
     private final SysUserMapper sysUserMapper;
     private final JwtUtil jwtUtil;
 
@@ -66,6 +67,20 @@ public class CallLogController {
                 "userId", key.getUserId(),
                 "keyId", key.getId()
         ));
+    }
+
+    /** 内部接口：额度校验（被 ai-agent 调用，调用模型前拦截超额度请求） */
+    @PostMapping("/api/internal/quota/check")
+    public R<Map<String, Object>> checkQuota(@RequestBody Map<String, Object> body) {
+        Long userId = toLong(body.get("userId"));
+        return R.ok(toQuotaMap(quotaService.check(userId)));
+    }
+
+    /** 用户本月额度状态（前端概览展示；admin 可传 userId 查看他人） */
+    @GetMapping("/api/stats/quota")
+    public R<Map<String, Object>> quota(@RequestHeader(value = "Authorization", required = false) String authHeader,
+                                        @RequestParam(required = false) Long userId) {
+        return R.ok(toQuotaMap(quotaService.check(resolveQuotaUserId(authHeader, userId))));
     }
 
     // ==================== Agent 内部 API ====================
@@ -192,6 +207,34 @@ public class CallLogController {
             return jwtUtil.getUserId(token);
         }
         return userId;
+    }
+
+    /**
+     * 解析额度查询的目标用户：
+     * - 普通用户：永远看自己（忽略 userId 参数）
+     * - admin：默认看自己（不限），传 userId 可查看指定用户
+     * - 内部直连（无 JWT）：沿用显式 userId
+     */
+    private Long resolveQuotaUserId(String authHeader, Long userId) {
+        if (authHeader != null && !authHeader.isBlank()) {
+            String token = authHeader.replace("Bearer ", "");
+            if ("admin".equals(jwtUtil.getRole(token)) && userId != null) {
+                return userId;
+            }
+            return jwtUtil.getUserId(token);
+        }
+        return userId;
+    }
+
+    private Map<String, Object> toQuotaMap(QuotaService.QuotaStatus s) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("unlimited", s.unlimited());
+        m.put("month", s.month());
+        m.put("quota", s.quota());
+        m.put("used", s.used());
+        m.put("remaining", s.remaining());
+        m.put("exceeded", s.exceeded());
+        return m;
     }
 
     private Long toLong(Object obj) {

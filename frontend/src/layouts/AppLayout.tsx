@@ -11,6 +11,7 @@ import {
   UserOutlined,
   ApiOutlined,
   TeamOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { Spin } from 'antd';
@@ -41,10 +42,16 @@ export default function AppLayout() {
     { key: '/dashboard', icon: <DashboardOutlined />, label: '概览' },
     { key: '/api-keys', icon: <KeyOutlined />, label: 'API Key' },
     { key: '/chat', icon: <ExperimentOutlined />, label: '在线调试' },
-    ...(role === 'admin' ? [{ key: '/admin', icon: <TeamOutlined />, label: '用户管理' }] : []),
+    ...(role === 'admin' ? [
+      { key: '/admin', icon: <TeamOutlined />, label: '用户管理' },
+      { key: '/admin/models', icon: <RobotOutlined />, label: '模型管理' },
+    ] : []),
   ];
 
-  const selectedKey = '/' + location.pathname.split('/')[1];
+  const segments = location.pathname.split('/').filter(Boolean);
+  const selectedKey = segments.length >= 2 && segments[0] === 'admin'
+    ? '/' + segments.slice(0, 2).join('/')
+    : '/' + segments[0];
 
   return (
     <Layout style={{ minHeight: '100vh' }}>

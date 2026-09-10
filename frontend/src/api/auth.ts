@@ -31,6 +31,8 @@ export interface AdminUser {
   email: string;
   role: string;
   status: number;
+  monthlyQuota: number | null;
+  monthUsed: number;
   createdAt: string;
 }
 
@@ -44,6 +46,10 @@ export async function setUserRole(userId: number, role: string) {
 
 export async function toggleUserStatus(userId: number, status: number) {
   return client.put<any, any>(`/admin/users/${userId}/status`, { status });
+}
+
+export async function setUserQuota(userId: number, quota: number | null) {
+  return client.put<any, any>(`/admin/users/${userId}/quota`, { quota });
 }
 
 export async function register(params: RegisterParams) {

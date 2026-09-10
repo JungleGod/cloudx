@@ -36,6 +36,8 @@ public class UserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impleme
         user.setEmail(dto.getEmail());
         user.setPhone(dto.getPhone());
         user.setStatus(1);
+        // 新用户默认每月 200 元基础额度
+        user.setMonthlyQuota(new java.math.BigDecimal("200.00"));
         save(user);
         return user;
     }

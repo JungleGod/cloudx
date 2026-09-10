@@ -2,11 +2,13 @@ package com.cloudx.biz.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.cloudx.biz.entity.SysUser;
+import com.cloudx.biz.service.QuotaService;
 import com.cloudx.biz.service.UserService;
 import com.cloudx.common.result.R;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.*;
 
 /**
@@ -19,6 +21,7 @@ import java.util.*;
 public class AdminController {
 
     private final UserService userService;
+    private final QuotaService quotaService;
 
     /** 校验是否管理员，不是则直接拒绝 */
     private void requireAdmin(String role) {
@@ -33,6 +36,8 @@ public class AdminController {
         requireAdmin(role);
         List<SysUser> users = userService.list(new LambdaQueryWrapper<SysUser>()
                 .orderByDesc(SysUser::getCreatedAt));
+        // 批量取每个用户本月已用金额
+        Map<Long, BigDecimal> usedMap = quotaService.monthUsedByUsers();
         List<Map<String, Object>> result = new ArrayList<>();
         for (SysUser u : users) {
             Map<String, Object> item = new LinkedHashMap<>();
@@ -41,6 +46,8 @@ public class AdminController {
             item.put("email", u.getEmail());
             item.put("role", u.getRole() != null ? u.getRole() : "user");
             item.put("status", u.getStatus());
+            item.put("monthlyQuota", u.getMonthlyQuota());
+            item.put("monthUsed", usedMap.getOrDefault(u.getId(), BigDecimal.ZERO));
             item.put("createdAt", u.getCreatedAt());
             result.add(item);
         }
@@ -73,6 +80,30 @@ public class AdminController {
             return R.fail("用户不存在");
         }
         user.setStatus((Integer) body.getOrDefault("status", 1));
+        userService.updateById(user);
+        return R.ok();
+    }
+
+    /** 调整用户每月基础额度（传 null 表示不限） */
+    @PutMapping("/users/{id}/quota")
+    public R<Void> setQuota(@PathVariable Long id,
+                            @RequestBody Map<String, Object> body,
+                            @RequestHeader("X-User-Role") String role) {
+        requireAdmin(role);
+        SysUser user = userService.getById(id);
+        if (user == null) {
+            return R.fail("用户不存在");
+        }
+        Object quota = body.get("quota");
+        if (quota == null || quota.toString().isBlank()) {
+            user.setMonthlyQuota(null);
+        } else {
+            BigDecimal value = new BigDecimal(quota.toString());
+            if (value.signum() < 0) {
+                return R.fail("额度不能为负数");
+            }
+            user.setMonthlyQuota(value);
+        }
         userService.updateById(user);
         return R.ok();
     }

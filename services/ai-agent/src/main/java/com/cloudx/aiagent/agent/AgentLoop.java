@@ -1,6 +1,7 @@
 package com.cloudx.aiagent.agent;
 
 import com.cloudx.aiagent.config.ModelConfig;
+import com.cloudx.aiagent.service.ModelConfigClient;
 import com.cloudx.aiagent.tool.ToolDefinition;
 import com.cloudx.aiagent.tool.ToolExecutor;
 import com.cloudx.aiagent.tool.ToolRegistry;
@@ -37,7 +38,7 @@ import java.util.stream.Collectors;
 @Component
 public class AgentLoop {
 
-    private final ModelConfig modelConfig;
+    private final ModelConfigClient modelConfigClient;
     private final ToolRegistry toolRegistry;
     private final ToolExecutor toolExecutor;
     private final AgentExecutionLogger executionLogger;
@@ -45,9 +46,9 @@ public class AgentLoop {
     /** 单次 LLM 调用最长等待时间 */
     private static final long LLM_TIMEOUT_SECONDS = 60;
 
-    public AgentLoop(ModelConfig modelConfig, ToolRegistry toolRegistry,
+    public AgentLoop(ModelConfigClient modelConfigClient, ToolRegistry toolRegistry,
                      ToolExecutor toolExecutor, AgentExecutionLogger executionLogger) {
-        this.modelConfig = modelConfig;
+        this.modelConfigClient = modelConfigClient;
         this.toolRegistry = toolRegistry;
         this.toolExecutor = toolExecutor;
         this.executionLogger = executionLogger;
@@ -90,13 +91,13 @@ public class AgentLoop {
             AiMessage aiMessage = response.content();
             TokenUsage usage = response.tokenUsage();
             if (usage != null) {
-                result.addTokens(usage.totalTokenCount());
+                result.addUsage(usage.inputTokenCount(), usage.outputTokenCount());
             }
 
             // 情况 1：LLM 直接返回文本（没有 tool_calls）
             if (!aiMessage.hasToolExecutionRequests() && aiMessage.text() != null && !aiMessage.text().isBlank()) {
                 result.setAnswer(aiMessage.text());
-                if (callback != null) callback.onDone(aiMessage.text());
+                finish(callback, result, aiMessage.text());
                 break;
             }
 
@@ -162,8 +163,10 @@ public class AgentLoop {
             Response<AiMessage> finalResp = callLLM(modelInfo, messages, List.of());
             if (finalResp != null && finalResp.content() != null && finalResp.content().text() != null) {
                 result.setAnswer(finalResp.content().text());
-                if (finalResp.tokenUsage() != null) result.addTokens(finalResp.tokenUsage().totalTokenCount());
-                if (callback != null) callback.onDone(finalResp.content().text());
+                if (finalResp.tokenUsage() != null) {
+                    result.addUsage(finalResp.tokenUsage().inputTokenCount(), finalResp.tokenUsage().outputTokenCount());
+                }
+                finish(callback, result, finalResp.content().text());
             } else {
                 result.setAnswer("（达到最大迭代次数，无法获取最终答案）");
             }
@@ -208,15 +211,17 @@ public class AgentLoop {
                     if (fallback != null && fallback.content() != null
                             && fallback.content().text() != null && !fallback.content().text().isBlank()) {
                         result.setAnswer(fallback.content().text());
-                        if (fallback.tokenUsage() != null) result.addTokens(fallback.tokenUsage().totalTokenCount());
-                        if (callback != null) callback.onDone(fallback.content().text());
+                        if (fallback.tokenUsage() != null) {
+                            result.addUsage(fallback.tokenUsage().inputTokenCount(), fallback.tokenUsage().outputTokenCount());
+                        }
+                        finish(callback, result, fallback.content().text());
                         break;
                     }
                     if (callback != null) callback.onError(streamResult.error);
                     return;
                 }
 
-                result.addTokens(streamResult.tokensUsed);
+                result.addUsage(streamResult.inputTokens, streamResult.outputTokens);
 
                 // 有 tool_calls → 执行工具并循环
                 if (!streamResult.toolCalls.isEmpty()) {
@@ -265,7 +270,7 @@ public class AgentLoop {
 
                 // 有文本内容 → 完成
                 result.setAnswer(streamResult.content);
-                if (callback != null) callback.onDone(streamResult.content);
+                finish(callback, result, streamResult.content);
                 break;
             }
 
@@ -275,16 +280,18 @@ public class AgentLoop {
                 StreamResult finalResp = callLLMStream(modelInfo, messages, List.of(), callback);
                 if (finalResp.error == null && finalResp.content != null) {
                     result.setAnswer(finalResp.content);
-                    result.addTokens(finalResp.tokensUsed);
+                    result.addUsage(finalResp.inputTokens, finalResp.outputTokens);
                 } else {
                     log.warn("Agent [{}] final stream failed, falling back to non-streaming", ctx.getAgentName());
                     Response<AiMessage> fallback = callLLM(modelInfo, messages, List.of());
                     if (fallback != null && fallback.content() != null && fallback.content().text() != null) {
                         result.setAnswer(fallback.content().text());
-                        if (fallback.tokenUsage() != null) result.addTokens(fallback.tokenUsage().totalTokenCount());
+                        if (fallback.tokenUsage() != null) {
+                            result.addUsage(fallback.tokenUsage().inputTokenCount(), fallback.tokenUsage().outputTokenCount());
+                        }
                     }
                 }
-                if (callback != null) callback.onDone(result.getAnswer());
+                finish(callback, result, result.getAnswer());
             }
 
         } catch (Exception e) {
@@ -383,11 +390,13 @@ public class AgentLoop {
                                     .build());
                         }
                     }
+                    TokenUsage streamUsage = response.tokenUsage();
                     future.complete(new StreamResult(
                             content.toString(),
                             null,
                             toolCalls,
-                            response.tokenUsage() != null ? response.tokenUsage().totalTokenCount() : 0
+                            streamUsage != null ? streamUsage.inputTokenCount() : 0,
+                            streamUsage != null ? streamUsage.outputTokenCount() : 0
                     ));
                 }
 
@@ -399,6 +408,7 @@ public class AgentLoop {
                                 content.toString(),
                                 error,
                                 toolCalls,
+                                0,
                                 0
                         ));
                     }
@@ -411,11 +421,11 @@ public class AgentLoop {
             log.warn("LLM stream timed out after {}s", LLM_TIMEOUT_SECONDS);
             return new StreamResult(null,
                     new RuntimeException("LLM 响应超时（" + LLM_TIMEOUT_SECONDS + "s），请重试"),
-                    List.of(), 0);
+                    List.of(), 0, 0);
         } catch (Exception e) {
             log.error("LLM stream call failed: {}", e.getMessage(), e);
             Throwable cause = e.getCause() != null ? e.getCause() : e;
-            return new StreamResult(null, cause, List.of(), 0);
+            return new StreamResult(null, cause, List.of(), 0, 0);
         }
     }
 
@@ -493,10 +503,11 @@ public class AgentLoop {
             info.setMaxTokens(4096);
             return info;
         }
-        // 从配置中获取第一个可用模型
-        ModelConfig.ModelInfo info = modelConfig.getModels().stream()
+        // 从 DB（biz-service）拉取启用且带 key 的模型，按优先级取第一个
+        ModelConfig.ModelInfo info = modelConfigClient.fetch().stream()
+                .filter(m -> m.getStatus() == 1)
                 .filter(ModelConfig.ModelInfo::hasKeys)
-                .findFirst()
+                .min(Comparator.comparingInt(ModelConfig.ModelInfo::getPriority))
                 .orElseThrow(() -> new RuntimeException("没有可用的 AI 模型"));
         ctx.setBaseUrl(info.getBaseUrl());
         ctx.setApiKey(info.getKeys().get(0));
@@ -552,9 +563,18 @@ public class AgentLoop {
     // ==================== 流式结果记录 ====================
 
     private record StreamResult(String content, Throwable error,
-                                 List<AgentMessage.ToolCall> toolCalls, int tokensUsed) {
+                                 List<AgentMessage.ToolCall> toolCalls,
+                                 int inputTokens, int outputTokens) {
         StreamResult {
             if (toolCalls == null) toolCalls = List.of();
+        }
+    }
+
+    /** 结束执行：先报告累计 token 用量，再回调最终答案 */
+    private void finish(AgentStreamCallback callback, AgentResult result, String text) {
+        if (callback != null) {
+            callback.onUsage(result.getInputTokens(), result.getOutputTokens());
+            callback.onDone(text);
         }
     }
 }

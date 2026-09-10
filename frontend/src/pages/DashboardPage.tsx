@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Row, Col, Card, Statistic, Spin, Alert } from 'antd';
+import { Row, Col, Card, Statistic, Spin, Alert, Progress } from 'antd';
 import {
   ThunderboltOutlined,
   FieldNumberOutlined,
   DollarOutlined,
 } from '@ant-design/icons';
-import { getTodayStats, getStatsByModel, getStatsDaily, type TodayStats, type ModelStats, type DailyStats } from '../api/stats';
+import { getTodayStats, getStatsByModel, getStatsDaily, getQuota, type TodayStats, type ModelStats, type DailyStats, type QuotaInfo } from '../api/stats';
 import ModelPieChart from '../components/ModelPieChart';
 import DailyTrendChart from '../components/DailyTrendChart';
 
@@ -13,6 +13,7 @@ export default function DashboardPage() {
   const [today, setToday] = useState<TodayStats | null>(null);
   const [byModel, setByModel] = useState<ModelStats[]>([]);
   const [daily, setDaily] = useState<DailyStats[]>([]);
+  const [quota, setQuota] = useState<QuotaInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,11 +22,13 @@ export default function DashboardPage() {
       getTodayStats(),
       getStatsByModel(7),
       getStatsDaily(30),
+      getQuota(),
     ])
-      .then(([todayRes, modelRes, dailyRes]) => {
+      .then(([todayRes, modelRes, dailyRes, quotaRes]) => {
         setToday(todayRes.data);
         setByModel(modelRes.data);
         setDaily(dailyRes.data);
+        setQuota(quotaRes.data);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -42,6 +45,30 @@ export default function DashboardPage() {
   return (
     <div>
       <h2 style={{ marginBottom: 24 }}>📊 数据概览</h2>
+
+      {/* 本月额度卡片 */}
+      <Card style={{ marginBottom: 24 }} title="本月基础额度">
+        {quota?.unlimited ? (
+          <div style={{ color: '#52c41a', fontWeight: 600 }}>不限额度（管理员）</div>
+        ) : (
+          <Row gutter={[16, 16]} align="middle">
+            <Col xs={24} md={16}>
+              <Progress
+                percent={quota && quota.quota ? Math.min(100, Math.round(((quota.used ?? 0) / quota.quota) * 100)) : 0}
+                status={quota?.exceeded ? 'exception' : 'normal'}
+                strokeColor={quota?.exceeded ? '#ff4d4f' : '#1677ff'}
+              />
+            </Col>
+            <Col xs={24} md={8} style={{ textAlign: 'right' }}>
+              <span style={{ fontSize: 14, color: '#666' }}>
+                已用 <b style={{ color: '#1677ff' }}>{(quota?.used ?? 0).toFixed(4)}</b> 元
+                / 总额 <b>{(quota?.quota ?? 0).toFixed(2)}</b> 元
+                ，剩余 <b style={{ color: '#52c41a' }}>{(quota?.remaining ?? 0).toFixed(4)}</b> 元
+              </span>
+            </Col>
+          </Row>
+        )}
+      </Card>
 
       {/* 今日概览卡片 */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>

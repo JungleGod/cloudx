@@ -97,9 +97,9 @@ public class OpenAiAdapter {
                                 .build()
                 ))
                 .usage(Usage.builder()
-                        .promptTokens(0)   // 估算值，后续从 Provider 获取精确值
-                        .completionTokens(result.reply().length() / 2)
-                        .totalTokens(result.reply().length() / 2)
+                        .promptTokens(result.inputTokens())
+                        .completionTokens(result.outputTokens())
+                        .totalTokens(result.inputTokens() + result.outputTokens())
                         .build())
                 .build();
     }
@@ -156,8 +156,8 @@ public class OpenAiAdapter {
      */
     public ChatCompletionResponse toResponseWithPrompt(RouteResult result, String requestId, String prompt, String displayModel) {
         long now = System.currentTimeMillis() / 1000;
-        int promptTokens = Math.max(1, prompt.length() / 2);
-        int completionTokens = Math.max(1, result.reply().length() / 2);
+        int promptTokens = result.inputTokens() > 0 ? result.inputTokens() : Math.max(1, prompt.length() / 2);
+        int completionTokens = result.outputTokens() > 0 ? result.outputTokens() : Math.max(1, result.reply().length() / 2);
 
         return ChatCompletionResponse.builder()
                 .id(requestId)

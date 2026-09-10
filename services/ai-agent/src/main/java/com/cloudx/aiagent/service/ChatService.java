@@ -36,9 +36,9 @@ public class ChatService {
         RouteResult result = modelRouter.route(fullPrompt, model, taskType);
         long latency = System.currentTimeMillis() - start;
 
-        // 估算 token 数
-        int tokensInput = fullPrompt.length() / 2;
-        int tokensOutput = result.reply().length() / 2;
+        // 真实 token 数（来自模型 usage，缺失时退回字符估算）
+        int tokensInput = result.inputTokens() > 0 ? result.inputTokens() : fullPrompt.length() / 2;
+        int tokensOutput = result.outputTokens() > 0 ? result.outputTokens() : result.reply().length() / 2;
 
         callLogClient.record(userId, result.model(), fullPrompt, result.reply(),
                 tokensInput, tokensOutput, latency, true, null);
@@ -104,15 +104,15 @@ public class ChatService {
             }
 
             @Override
-            public void onComplete() {
+            public void onComplete(int inputTokens, int outputTokens) {
                 long latency = System.currentTimeMillis() - start;
                 String reply = replyHolder[0];
                 String usedModel = (model != null && !model.isBlank()) ? model : "auto";
-                int tokensInput = fullPrompt.length() / 2;
-                int tokensOutput = reply.length() / 2;
+                int tokensInput = inputTokens > 0 ? inputTokens : fullPrompt.length() / 2;
+                int tokensOutput = outputTokens > 0 ? outputTokens : reply.length() / 2;
                 callLogClient.record(userId, usedModel, fullPrompt, reply,
                         tokensInput, tokensOutput, latency, true, null);
-                callback.onComplete();
+                callback.onComplete(inputTokens, outputTokens);
             }
 
             @Override
@@ -136,10 +136,11 @@ public class ChatService {
     public RouteResult chatMultimodal(String text, List<String> base64Images,
                                       String model, String taskType, Long userId) {
         RouteResult result = modelRouter.routeMultimodal(text, base64Images, model, taskType);
-        // 异步记录调用日志
+        int tokensInput = result.inputTokens() > 0 ? result.inputTokens() : text.length() / 2;
+        int tokensOutput = result.outputTokens() > 0 ? result.outputTokens() : result.reply().length() / 2;
+        // 记录调用日志（真实 token 来自模型 usage）
         callLogClient.record(userId, result.model(), text, result.reply(),
-                text.length() / 2, result.reply().length() / 2,
-                0, true, null);
+                tokensInput, tokensOutput, 0, true, null);
         return result;
     }
 

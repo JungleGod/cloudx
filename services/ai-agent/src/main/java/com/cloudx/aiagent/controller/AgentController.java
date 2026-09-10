@@ -2,6 +2,7 @@ package com.cloudx.aiagent.controller;
 
 import com.cloudx.aiagent.agent.*;
 import com.cloudx.aiagent.service.AgentService;
+import com.cloudx.aiagent.service.QuotaClient;
 import com.cloudx.aiagent.tool.ToolDefinition;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class AgentController {
     private final AgentService agentService;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
+    private final QuotaClient quotaClient;
     private static final String BIZ_URL = "http://localhost:8081";
 
     // ==================== Agent CRUD（代理到 biz-service）====================
@@ -96,6 +98,7 @@ public class AgentController {
     @PostMapping("/api/agents/execute")
     public ResponseEntity<?> executeAgent(@RequestBody AgentExecuteRequest request) {
         AgentExecutionContext ctx = buildContext(request);
+        quotaClient.checkQuota(ctx.getUserId());
         AgentResult result = agentService.execute(ctx);
         // 统一返回体 {code, msg, data}，与前端 axios 拦截器约定一致
         return ResponseEntity.ok(Map.of(
@@ -110,8 +113,10 @@ public class AgentController {
      */
     @PostMapping(value = "/api/agents/execute/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter executeAgentStream(@RequestBody AgentExecuteRequest request) {
-        SseEmitter emitter = new SseEmitter(300_000L);
         AgentExecutionContext ctx = buildContext(request);
+        // 流式接口需在 HTTP 线程同步校验
+        quotaClient.checkQuota(ctx.getUserId());
+        SseEmitter emitter = new SseEmitter(300_000L);
 
         AgentStreamCallback callback = new AgentStreamCallback() {
             @Override

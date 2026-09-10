@@ -20,6 +20,15 @@ export interface DailyStats {
   cost: number;
 }
 
+export interface QuotaInfo {
+  unlimited: boolean;
+  month: string;
+  quota: number | null;
+  used: number | null;
+  remaining: number | null;
+  exceeded: boolean;
+}
+
 export async function getTodayStats(userId?: number) {
   return client.get<any, { data: TodayStats }>('/stats/today', {
     params: userId ? { userId } : undefined,
@@ -36,4 +45,8 @@ export async function getStatsDaily(days: number = 30) {
   return client.get<any, { data: DailyStats[] }>('/stats/daily', {
     params: { days },
   });
+}
+
+export async function getQuota() {
+  return client.get<any, { data: QuotaInfo }>('/stats/quota');
 }

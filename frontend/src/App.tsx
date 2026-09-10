@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage';
 import ApiKeysPage from './pages/ApiKeysPage';
 import ChatPage from './pages/ChatPage';
 import AdminUsersPage from './pages/AdminUsersPage';
+import AdminModelsPage from './pages/AdminModelsPage';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/playground" element={<Navigate to="/chat" replace />} />
               <Route path="/admin" element={<AdminUsersPage />} />
+              <Route path="/admin/models" element={<AdminModelsPage />} />
             </Route>
 
             {/* 默认跳转 */}

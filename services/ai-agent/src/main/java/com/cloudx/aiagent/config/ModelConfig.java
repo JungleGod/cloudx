@@ -46,6 +46,8 @@ public class ModelConfig {
         private double frequencyPenalty = 0.3;
         /** 存在惩罚 -2.0~2.0，正数抑制已出现过的 token */
         private double presencePenalty = 0.3;
+        /** 状态：1-启用 0-禁用（DB 来源时使用；YAML 默认 1） */
+        private int status = 1;
 
         public boolean hasKeys() {
             return keys != null && !keys.isEmpty() && keys.stream().anyMatch(k -> k != null && !k.isBlank());

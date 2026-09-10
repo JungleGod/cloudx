@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Table, Tag, Button, Select, message, Spin, Alert } from 'antd';
+import { Table, Tag, Button, Select, message, Spin, Alert, InputNumber } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { listUsers, setUserRole, toggleUserStatus, type AdminUser } from '../api/auth';
+import { listUsers, setUserRole, toggleUserStatus, setUserQuota, type AdminUser } from '../api/auth';
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -38,6 +38,14 @@ export default function AdminUsersPage() {
     } catch { /* handled */ }
   };
 
+  const handleQuotaChange = async (userId: number, value: number | null) => {
+    try {
+      await setUserQuota(userId, value);
+      message.success('额度已更新');
+      fetchUsers();
+    } catch { /* handled */ }
+  };
+
   if (error) {
     return <Alert type="warning" message="加载失败" description={error} showIcon />;
   }
@@ -66,6 +74,34 @@ export default function AdminUsersPage() {
       render: (val: number) => (
         val === 1 ? <Tag color="green">正常</Tag> : <Tag color="red">禁用</Tag>
       ),
+    },
+    {
+      title: '本月额度(元)', key: 'quota', width: 180,
+      render: (_: any, record: AdminUser) => {
+        if (record.role === 'admin') {
+          return <Tag color="blue">不限</Tag>;
+        }
+        return (
+          <div>
+            <InputNumber
+              size="small"
+              min={0}
+              style={{ width: 90 }}
+              defaultValue={record.monthlyQuota ?? undefined}
+              placeholder="不限"
+              onBlur={(e) => {
+                const raw = e.target.value;
+                const parsed = raw === '' || raw === null || raw === undefined
+                  ? null : Number(raw);
+                handleQuotaChange(record.id, parsed);
+              }}
+            />
+            <div style={{ color: '#999', fontSize: 12, marginTop: 2 }}>
+              已用 {(record.monthUsed ?? 0).toFixed(4)} 元
+            </div>
+          </div>
+        );
+      },
     },
     {
       title: '注册时间', dataIndex: 'createdAt', key: 'createdAt', width: 180,

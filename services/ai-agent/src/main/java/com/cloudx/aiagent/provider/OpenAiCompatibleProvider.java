@@ -6,6 +6,8 @@ import com.cloudx.aiagent.loadbalance.LoadBalancer;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.output.TokenUsage;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
@@ -60,6 +62,25 @@ public class OpenAiCompatibleProvider implements ModelProvider {
     }
 
     @Override
+    public ChatResult chatDetailed(String message) {
+        String key = loadBalancer.next();
+        OpenAiChatModel model = OpenAiChatModel.builder()
+                .apiKey(key)
+                .baseUrl(config.getBaseUrl())
+                .modelName(config.getModelName())
+                .temperature(config.getTemperature())
+                .maxTokens(config.getMaxTokens())
+                .frequencyPenalty(config.getFrequencyPenalty())
+                .presencePenalty(config.getPresencePenalty())
+                .timeout(Duration.ofSeconds(config.getTimeoutSeconds()))
+                .build();
+
+        log.debug("[{}] calling (detailed) with key prefix: {}...", modelName, key.substring(0, 10));
+        Response<AiMessage> response = model.generate(UserMessage.from(message));
+        return toChatResult(response);
+    }
+
+    @Override
     public void streamChat(String message, StreamCallback callback) {
         String key = loadBalancer.next();
         OpenAiStreamingChatModel model = OpenAiStreamingChatModel.builder()
@@ -84,7 +105,10 @@ public class OpenAiCompatibleProvider implements ModelProvider {
             public void onComplete(dev.langchain4j.model.output.Response<dev.langchain4j.data.message.AiMessage> response) {
                 log.debug("[{}] stream complete, finishReason={}", modelName,
                         response.finishReason() != null ? response.finishReason().name() : "null");
-                callback.onComplete();
+                TokenUsage usage = response.tokenUsage();
+                int input = usage != null ? usage.inputTokenCount() : 0;
+                int output = usage != null ? usage.outputTokenCount() : 0;
+                callback.onComplete(input, output);
             }
 
             @Override
@@ -119,6 +143,41 @@ public class OpenAiCompatibleProvider implements ModelProvider {
         log.debug("[{}] multimodal call, text={}, images={}", modelName,
                 text.length() > 50 ? text.substring(0, 50) + "..." : text, base64Images.size());
         return model.generate(List.of(userMsg)).content().text();
+    }
+
+    @Override
+    public ChatResult chatMultimodalDetailed(String text, List<String> base64Images) {
+        String key = loadBalancer.next();
+        OpenAiChatModel model = OpenAiChatModel.builder()
+                .apiKey(key)
+                .baseUrl(config.getBaseUrl())
+                .modelName(config.getModelName())
+                .temperature(config.getTemperature())
+                .maxTokens(config.getMaxTokens())
+                .frequencyPenalty(config.getFrequencyPenalty())
+                .presencePenalty(config.getPresencePenalty())
+                .timeout(Duration.ofSeconds(config.getTimeoutSeconds()))
+                .build();
+
+        List<Content> contents = new ArrayList<>();
+        contents.add(TextContent.from(text));
+        for (String img : base64Images) {
+            contents.add(ImageContent.from(img));
+        }
+        UserMessage userMsg = UserMessage.from(contents);
+
+        Response<AiMessage> response = model.generate(List.of(userMsg));
+        return toChatResult(response);
+    }
+
+    /** 从 LangChain4j 响应中提取文本 + 真实 token 用量 */
+    private ChatResult toChatResult(Response<AiMessage> response) {
+        String reply = response.content() != null && response.content().text() != null
+                ? response.content().text() : "";
+        TokenUsage usage = response.tokenUsage();
+        int input = usage != null ? usage.inputTokenCount() : 0;
+        int output = usage != null ? usage.outputTokenCount() : 0;
+        return new ChatResult(reply, input, output);
     }
 
     @Override

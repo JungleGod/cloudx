@@ -29,7 +29,18 @@ public class AgentService {
      */
     public AgentResult execute(AgentExecutionContext ctx) {
         log.info("Agent [{}] sync execution for user {}", ctx.getAgentName(), ctx.getUserId());
-        return agentLoop.execute(ctx, null);
+        AgentResult result = agentLoop.execute(ctx, null);
+        // 同步 Agent 执行同样记入调用日志，用于成本/额度统计（真实 token 来自模型 usage）
+        int tokensInput = result.getInputTokens() > 0 ? result.getInputTokens()
+                : (ctx.getUserMessage() != null ? ctx.getUserMessage().length() / 2 : 0);
+        int tokensOutput = result.getOutputTokens() > 0 ? result.getOutputTokens()
+                : (result.getAnswer() != null ? result.getAnswer().length() / 2 : 0);
+        callLogClient.record(ctx.getUserId(),
+                ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
+                ctx.getUserMessage() != null ? ctx.getUserMessage() : "",
+                result.getAnswer() != null ? result.getAnswer() : "",
+                tokensInput, tokensOutput, result.getElapsedMs(), true, null);
+        return result;
     }
 
     /**
@@ -42,6 +53,8 @@ public class AgentService {
         AgentStreamCallback wrapped = new AgentStreamCallback() {
             private final StringBuilder fullContent = new StringBuilder();
             private final long start = System.currentTimeMillis();
+            // [input, output]，由 AgentLoop 在 onDone 前通过 onUsage 回填
+            private final int[] usage = new int[2];
 
             @Override
             public void onThinking() { callback.onThinking(); }
@@ -73,12 +86,20 @@ public class AgentService {
             }
 
             @Override
+            public void onUsage(int inputTokens, int outputTokens) {
+                usage[0] = inputTokens;
+                usage[1] = outputTokens;
+            }
+
+            @Override
             public void onDone(String fullReply) {
                 if (fullReply != null) fullContent.append(fullReply);
                 long latency = System.currentTimeMillis() - start;
+                int tokensInput = usage[0] > 0 ? usage[0] : ctx.getUserMessage().length() / 2;
+                int tokensOutput = usage[1] > 0 ? usage[1] : fullContent.length() / 2;
                 callLogClient.record(ctx.getUserId(), ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
                         ctx.getUserMessage(), fullContent.toString(),
-                        ctx.getUserMessage().length() / 2, fullContent.length() / 2,
+                        tokensInput, tokensOutput,
                         latency, true, null);
                 callback.onDone(fullReply);
             }
@@ -86,9 +107,11 @@ public class AgentService {
             @Override
             public void onError(Throwable error) {
                 long latency = System.currentTimeMillis() - start;
+                int tokensInput = usage[0] > 0 ? usage[0] : ctx.getUserMessage().length() / 2;
+                int tokensOutput = usage[1] > 0 ? usage[1] : fullContent.length() / 2;
                 callLogClient.record(ctx.getUserId(), ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
                         ctx.getUserMessage(), fullContent.toString(),
-                        ctx.getUserMessage().length() / 2, fullContent.length() / 2,
+                        tokensInput, tokensOutput,
                         latency, false, error.getMessage());
                 callback.onError(error);
             }

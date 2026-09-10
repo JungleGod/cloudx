@@ -3,6 +3,7 @@ package com.cloudx.aiagent.controller;
 import com.cloudx.aiagent.provider.StreamCallback;
 import com.cloudx.aiagent.routing.ModelRouter.RouteResult;
 import com.cloudx.aiagent.service.ChatService;
+import com.cloudx.aiagent.service.QuotaClient;
 import com.cloudx.common.result.R;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,11 +20,13 @@ import java.util.*;
 public class ChatController {
 
     private final ChatService chatService;
+    private final QuotaClient quotaClient;
 
     @SuppressWarnings("unchecked")
     @PostMapping("/chat")
     public R<Map<String, Object>> chat(@RequestBody Map<String, Object> body,
                                         @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        quotaClient.checkQuota(userId);
         String message = (String) body.getOrDefault("message", "");
         if (message.isBlank()) {
             return R.fail("消息不能为空");
@@ -48,6 +51,8 @@ public class ChatController {
     @PostMapping("/chat/stream")
     public SseEmitter chatStream(@RequestBody Map<String, Object> body,
                                   @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        // 流式接口需在 HTTP 线程同步校验，避免 429 落到后台线程导致客户端只见流断开
+        quotaClient.checkQuota(userId);
         String message = (String) body.getOrDefault("message", "");
         if (message == null || message.isBlank()) {
             SseEmitter errorEmitter = new SseEmitter();
@@ -74,7 +79,7 @@ public class ChatController {
             }
 
             @Override
-            public void onComplete() {
+            public void onComplete(int inputTokens, int outputTokens) {
                 try {
                     emitter.send(SseEmitter.event().name("done")
                             .data(Map.of("reply", fullReply.toString())));
@@ -109,6 +114,7 @@ public class ChatController {
     @PostMapping("/chat/multimodal")
     public R<Map<String, Object>> chatMultimodal(@RequestBody Map<String, Object> body,
                                                   @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        quotaClient.checkQuota(userId);
         String message = (String) body.getOrDefault("message", "");
         if (message.isBlank()) {
             return R.fail("消息不能为空");

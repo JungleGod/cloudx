@@ -53,6 +53,13 @@ public interface AgentStreamCallback {
     default void onDone(String fullContent) {}
 
     /**
+     * 报告本轮 Agent 执行累计的真实 token 用量（输入/输出），在 onDone 之前触发
+     * @param inputTokens  累计输入 token（prompt_tokens）
+     * @param outputTokens 累计输出 token（completion_tokens）
+     */
+    default void onUsage(int inputTokens, int outputTokens) {}
+
+    /**
      * 出错
      */
     default void onError(Throwable error) {}

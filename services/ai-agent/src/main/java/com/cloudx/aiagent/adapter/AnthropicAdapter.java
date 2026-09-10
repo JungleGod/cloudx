@@ -70,8 +70,8 @@ public class AnthropicAdapter {
     // ==================== 非流式响应 ====================
 
     public MessagesResponse toResponse(RouteResult result, String requestId, String prompt, String displayModel) {
-        int inputTokens = Math.max(1, prompt.length() / 2);
-        int outputTokens = Math.max(1, result.reply().length() / 2);
+        int inputTokens = result.inputTokens() > 0 ? result.inputTokens() : Math.max(1, prompt.length() / 2);
+        int outputTokens = result.outputTokens() > 0 ? result.outputTokens() : Math.max(1, result.reply().length() / 2);
         return MessagesResponse.builder()
                 .id(requestId)
                 .model(displayModel != null ? displayModel : result.model())

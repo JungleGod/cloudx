@@ -27,6 +27,14 @@ public class AgentResult {
     @Builder.Default
     private int totalTokens = 0;
 
+    /** 输入 token 消耗（prompt_tokens，跨所有迭代累计） */
+    @Builder.Default
+    private int inputTokens = 0;
+
+    /** 输出 token 消耗（completion_tokens，跨所有迭代累计） */
+    @Builder.Default
+    private int outputTokens = 0;
+
     /** 执行耗时（毫秒） */
     private long elapsedMs;
 
@@ -62,7 +70,10 @@ public class AgentResult {
         toolSteps.add(step);
     }
 
-    public void addTokens(int tokens) {
-        this.totalTokens += tokens;
+    /** 累加一次 LLM 调用的 token（输入/输出分开，total 同步累加） */
+    public void addUsage(int input, int output) {
+        this.inputTokens += input;
+        this.outputTokens += output;
+        this.totalTokens += input + output;
     }
 }

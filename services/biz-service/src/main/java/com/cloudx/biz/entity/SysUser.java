@@ -3,6 +3,7 @@ package com.cloudx.biz.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -18,6 +19,8 @@ public class SysUser {
     private Integer status;
     /** 角色：admin / user */
     private String role;
+    /** 每月基础额度（元），NULL 表示不限 */
+    private BigDecimal monthlyQuota;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

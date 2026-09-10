@@ -4,15 +4,19 @@ import com.cloudx.aiagent.config.ModelConfig;
 import com.cloudx.aiagent.provider.ModelProvider;
 import com.cloudx.aiagent.provider.OpenAiCompatibleProvider;
 import com.cloudx.aiagent.provider.StreamCallback;
+import com.cloudx.aiagent.service.ModelConfigClient;
 import com.cloudx.common.exception.BizException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.context.scope.refresh.RefreshScopeRefreshedEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -25,13 +29,18 @@ import java.util.stream.Collectors;
 public class ModelRouter {
 
     private final ModelConfig modelConfig;
-    private final Map<String, ModelProvider> providers = new LinkedHashMap<>();
-    private final Map<String, List<String>> tagIndex = new HashMap<>();
-    private List<ModelProvider> sortedByPriority = new ArrayList<>();
-    private final AtomicInteger refreshCount = new AtomicInteger(0);
+    private final ModelConfigClient modelConfigClient;
 
-    public ModelRouter(ModelConfig modelConfig) {
+    // 快照：发布后不再原地修改，避免 Nacos 刷新 / 定时任务与请求线程并发读脏数据
+    private volatile Map<String, ModelProvider> providers = new LinkedHashMap<>();
+    private volatile Map<String, List<String>> tagIndex = new HashMap<>();
+    private volatile List<ModelProvider> sortedByPriority = new ArrayList<>();
+    private volatile List<ModelConfig.ModelInfo> activeModels = List.of();
+    private volatile String lastFingerprint;
+
+    public ModelRouter(ModelConfig modelConfig, ModelConfigClient modelConfigClient) {
         this.modelConfig = modelConfig;
+        this.modelConfigClient = modelConfigClient;
     }
 
     @PostConstruct
@@ -40,31 +49,76 @@ public class ModelRouter {
     }
 
     /**
-     * 重建所有 provider 和索引 — 配置变更时自动调用
+     * 重建所有 provider 和索引 — 模型变更时调用；签名未变则跳过（避免无谓重建重置熔断计数）
      */
     public void refresh() {
-        providers.clear();
-        tagIndex.clear();
+        List<ModelConfig.ModelInfo> resolved = resolveModels();
+        String fp = fingerprint(resolved);
+        if (fp.equals(lastFingerprint)) {
+            log.debug("Model config unchanged, skip rebuild ({} models)", resolved.size());
+            return;
+        }
+        rebuildProviders(resolved);
+        lastFingerprint = fp;
+    }
 
-        for (ModelConfig.ModelInfo info : modelConfig.getModels()) {
+    /**
+     * 模型来源：DB 权威（一旦有至少一个启用且带 key 的模型）；否则回退 YAML。
+     * 瞬时拉取失败时保留当前模型，避免 biz-service 重启导致 DB↔YAML 抖动。
+     */
+    private List<ModelConfig.ModelInfo> resolveModels() {
+        List<ModelConfig.ModelInfo> db;
+        try {
+            db = modelConfigClient.fetch();
+        } catch (Exception e) {
+            log.warn("biz-service model fetch failed: {}; keeping current {} model(s)",
+                    e.getMessage(), activeModels.size());
+            return activeModels.isEmpty() ? modelConfig.getModels() : activeModels;
+        }
+        boolean dbAuthoritative = db != null && db.stream()
+                .anyMatch(m -> m.getStatus() == 1 && m.hasKeys());
+        if (dbAuthoritative) {
+            log.info("DB authoritative: {} model(s), {} keyed",
+                    db.size(), db.stream().filter(ModelConfig.ModelInfo::hasKeys).count());
+            return db;
+        }
+        log.warn("DB has no keyed/enabled models, falling back to YAML model config");
+        return modelConfig.getModels();
+    }
+
+    /** 原子发布：先建好新快照，再一次性替换，绝不原地修改正在被读取的集合 */
+    private void rebuildProviders(List<ModelConfig.ModelInfo> models) {
+        this.activeModels = List.copyOf(models);
+
+        Map<String, ModelProvider> newProviders = new LinkedHashMap<>();
+        Map<String, List<String>> newTagIndex = new HashMap<>();
+
+        for (ModelConfig.ModelInfo info : models) {
+            if (info.getStatus() != 1) {
+                log.info("Model [{}] disabled (status={}), skipping", info.getName(), info.getStatus());
+                continue;
+            }
             if (!info.hasKeys()) {
                 log.warn("Model [{}] has no valid API keys, skipping", info.getName());
                 continue;
             }
             ModelProvider provider = new OpenAiCompatibleProvider(info);
-            providers.put(info.getName(), provider);
+            newProviders.put(info.getName(), provider);
 
             for (String tag : info.getTags()) {
-                tagIndex.computeIfAbsent(tag, k -> new ArrayList<>()).add(info.getName());
+                newTagIndex.computeIfAbsent(tag, k -> new ArrayList<>()).add(info.getName());
             }
         }
 
-        sortedByPriority = providers.values().stream()
+        List<ModelProvider> newSorted = newProviders.values().stream()
                 .sorted(Comparator.comparing(p -> getConfig(p.getModelName()).getPriority()))
                 .collect(Collectors.toList());
 
-        int count = refreshCount.incrementAndGet();
-        log.info("ModelRouter refreshed (#{}): {} providers, tags: {}", count, providers.size(), tagIndex.keySet());
+        this.providers = newProviders;
+        this.tagIndex = newTagIndex;
+        this.sortedByPriority = newSorted;
+
+        log.info("ModelRouter rebuilt: {} providers, tags: {}", providers.size(), tagIndex.keySet());
     }
 
     /**
@@ -74,6 +128,52 @@ public class ModelRouter {
     public void onConfigRefresh(RefreshScopeRefreshedEvent event) {
         log.info("Detected RefreshScopeRefreshedEvent, rebuilding ModelRouter...");
         refresh();
+    }
+
+    /** 定时轮询 DB 模型配置，变更时热刷新 */
+    @Scheduled(fixedDelayString = "${cloudx.model-refresh-ms:30000}", initialDelayString = "${cloudx.model-refresh-ms:30000}")
+    public void scheduledRefresh() {
+        try {
+            refresh();
+        } catch (Exception e) {
+            log.error("Scheduled model refresh failed: {}", e.getMessage());
+        }
+    }
+
+    /** 模型列表指纹（SHA-256，不落明文 key），用于变更检测 */
+    private String fingerprint(List<ModelConfig.ModelInfo> models) {
+        StringBuilder sb = new StringBuilder();
+        models.stream()
+                .sorted(Comparator.comparing(m -> m.getName() == null ? "" : m.getName()))
+                .forEach(m -> sb.append(m.getName()).append('|')
+                        .append(m.getProvider()).append('|')
+                        .append(m.getBaseUrl()).append('|')
+                        .append(m.getModelName()).append('|')
+                        .append(m.getStatus()).append('|')
+                        .append(m.getPriority()).append('|')
+                        .append(m.getMaxFailures()).append('|')
+                        .append(m.getFallback()).append('|')
+                        .append(m.getTemperature()).append('|')
+                        .append(m.getMaxTokens()).append('|')
+                        .append(m.getTimeoutSeconds()).append('|')
+                        .append(m.getFrequencyPenalty()).append('|')
+                        .append(m.getPresencePenalty()).append('|')
+                        .append(sortList(m.getKeys())).append('|')
+                        .append(sortList(m.getTags())).append(';'));
+        return sha256Hex(sb.toString());
+    }
+
+    private static String sortList(List<String> in) {
+        return in == null ? "[]" : in.stream().sorted().toList().toString();
+    }
+
+    private static String sha256Hex(String s) {
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(d);
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(s.hashCode());
+        }
     }
 
     /**
@@ -115,9 +215,10 @@ public class ModelRouter {
     }
 
     /**
-     * 路由结果，包含元信息
+     * 路由结果，包含元信息与真实 token 用量（input/output，来自模型 usage）
      */
-    public record RouteResult(String reply, String model, String strategy, boolean failover) {}
+    public record RouteResult(String reply, String model, String strategy, boolean failover,
+                              int inputTokens, int outputTokens) {}
 
     /**
      * 路由选择模型并执行对话
@@ -133,9 +234,10 @@ public class ModelRouter {
 
         // 调用主模型
         try {
-            String reply = provider.chat(message);
+            ModelProvider.ChatResult cr = provider.chatDetailed(message);
             provider.recordSuccess();
-            return new RouteResult(reply, provider.getModelName(), strategy, false);
+            return new RouteResult(cr.reply(), provider.getModelName(), strategy, false,
+                    cr.inputTokens(), cr.outputTokens());
         } catch (Exception e) {
             log.error("Model [{}] failed: {}", provider.getModelName(), e.getMessage());
             provider.recordFailure();
@@ -147,9 +249,10 @@ public class ModelRouter {
                 if (fallback != null && fallback.isAvailable()) {
                     log.warn("Falling back to [{}]", fallback.getModelName());
                     try {
-                        String reply = fallback.chat(message);
+                        ModelProvider.ChatResult cr = fallback.chatDetailed(message);
                         fallback.recordSuccess();
-                        return new RouteResult(reply, fallback.getModelName(), "failover", true);
+                        return new RouteResult(cr.reply(), fallback.getModelName(), "failover", true,
+                                cr.inputTokens(), cr.outputTokens());
                     } catch (Exception fe) {
                         log.error("Fallback model [{}] also failed: {}", fallback.getModelName(), fe.getMessage());
                         fallback.recordFailure();
@@ -390,7 +493,7 @@ public class ModelRouter {
     }
 
     private ModelConfig.ModelInfo getConfig(String modelName) {
-        return modelConfig.getModels().stream()
+        return activeModels.stream()
                 .filter(m -> m.getName().equals(modelName))
                 .findFirst()
                 .orElseThrow(() -> new BizException("模型配置不存在: " + modelName));
@@ -402,9 +505,10 @@ public class ModelRouter {
         String strategy = resolveStrategy(model, taskType, text);
 
         try {
-            String reply = provider.chatMultimodal(text, base64Images);
+            ModelProvider.ChatResult cr = provider.chatMultimodalDetailed(text, base64Images);
             provider.recordSuccess();
-            return new RouteResult(reply, provider.getModelName(), strategy, false);
+            return new RouteResult(cr.reply(), provider.getModelName(), strategy, false,
+                    cr.inputTokens(), cr.outputTokens());
         } catch (Exception e) {
             log.error("Multimodal model [{}] failed: {}", provider.getModelName(), e.getMessage());
             provider.recordFailure();
@@ -413,9 +517,10 @@ public class ModelRouter {
                 ModelProvider fallback = providers.get(config.getFallback());
                 if (fallback != null && fallback.isAvailable()) {
                     try {
-                        String reply = fallback.chatMultimodal(text, base64Images);
+                        ModelProvider.ChatResult cr = fallback.chatMultimodalDetailed(text, base64Images);
                         fallback.recordSuccess();
-                        return new RouteResult(reply, fallback.getModelName(), "failover", true);
+                        return new RouteResult(cr.reply(), fallback.getModelName(), "failover", true,
+                                cr.inputTokens(), cr.outputTokens());
                     } catch (Exception fe) {
                         log.error("Multimodal fallback [{}] also failed", fallback.getModelName());
                         fallback.recordFailure();
