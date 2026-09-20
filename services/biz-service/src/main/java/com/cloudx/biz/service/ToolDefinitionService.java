@@ -15,4 +15,13 @@ public interface ToolDefinitionService extends IService<ToolDefinition> {
 
     /** 批量按名称获取 */
     List<ToolDefinition> getByNames(List<String> names);
+
+    /** 创建工具（built-in 类别禁止页面/API 新建，只能走代码+SQL） */
+    void createTool(ToolDefinition tool);
+
+    /** 更新工具（null 字段跳过，保留原值） */
+    void updateTool(Long id, ToolDefinition tool);
+
+    /** 删除工具（级联解除所有 Agent 绑定） */
+    void deleteTool(Long id);
 }

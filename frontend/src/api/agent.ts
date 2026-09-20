@@ -8,6 +8,10 @@ export interface AgentDefinition {
   model: string | null;
   temperature: number;
   maxIterations: number;
+  /** internal=平台内置(本地AgentLoop) / external=第三方(OpenAI兼容HTTP委托) */
+  executionType?: 'internal' | 'external';
+  endpointUrl?: string | null;
+  dispatchTimeoutMs?: number | null;
   status: number;
   createdBy: number;
   createdAt: string;
@@ -18,12 +22,19 @@ export interface ToolDefinition {
   id: number;
   name: string;
   description: string;
-  category: 'built-in' | 'http' | 'internal-api';
+  category: 'built-in' | 'http' | 'internal-api' | 'agent';
   parametersSchema: any;
   requiredRole: 'public' | 'user' | 'admin';
   timeoutMs: number;
   retryCount: number;
   enabled: boolean;
+  /** ---- 以下为 DB 全量视图字段（工具管理页用）---- */
+  status?: number;
+  httpMethod?: string | null;
+  httpUrl?: string | null;
+  httpHeaders?: string | null;
+  internalPath?: string | null;
+  builtinHandler?: string | null;
 }
 
 export interface AgentExecuteResult {
@@ -201,6 +212,11 @@ export async function deleteAgent(id: number) {
   return client.delete(`/agents/${id}`);
 }
 
+/** 绑定 Agent 的工具（全量覆盖） */
+export async function bindAgentTools(agentId: number, toolIds: number[]) {
+  return client.put(`/agents/${agentId}/tools`, { toolIds });
+}
+
 // ==================== 工具 ====================
 
 /** 获取 Agent 绑定的工具 */
@@ -220,6 +236,28 @@ export async function getAllTools(role?: string) {
 /** 热重载工具 */
 export async function reloadTools() {
   return client.post('/admin/tools/reload');
+}
+
+// ==================== 工具管理 CRUD（DB 全量视图）====================
+
+/** 列出全部工具（含停用） */
+export async function listAllToolDefs() {
+  return client.get<any, { data: ToolDefinition[] }>('/admin/tools/all');
+}
+
+/** 创建工具 */
+export async function createToolDef(data: Record<string, any>) {
+  return client.post('/admin/tools/create', data);
+}
+
+/** 更新工具 */
+export async function updateToolDef(id: number, data: Record<string, any>) {
+  return client.put(`/admin/tools/${id}`, data);
+}
+
+/** 删除工具（级联解除 Agent 绑定） */
+export async function deleteToolDef(id: number) {
+  return client.delete(`/admin/tools/${id}`);
 }
 
 function getUserId(): number | undefined {

@@ -1,6 +1,7 @@
 package com.cloudx.aiagent.agent;
 
 import com.cloudx.aiagent.config.ModelConfig;
+import com.cloudx.aiagent.service.AgentCatalog;
 import com.cloudx.aiagent.service.ModelConfigClient;
 import com.cloudx.aiagent.tool.ToolDefinition;
 import com.cloudx.aiagent.tool.ToolExecutor;
@@ -42,16 +43,19 @@ public class AgentLoop {
     private final ToolRegistry toolRegistry;
     private final ToolExecutor toolExecutor;
     private final AgentExecutionLogger executionLogger;
+    private final AgentCatalog agentCatalog;
 
     /** 单次 LLM 调用最长等待时间 */
     private static final long LLM_TIMEOUT_SECONDS = 60;
 
     public AgentLoop(ModelConfigClient modelConfigClient, ToolRegistry toolRegistry,
-                     ToolExecutor toolExecutor, AgentExecutionLogger executionLogger) {
+                     ToolExecutor toolExecutor, AgentExecutionLogger executionLogger,
+                     AgentCatalog agentCatalog) {
         this.modelConfigClient = modelConfigClient;
         this.toolRegistry = toolRegistry;
         this.toolExecutor = toolExecutor;
         this.executionLogger = executionLogger;
+        this.agentCatalog = agentCatalog;
     }
 
     // ==================== 同步执行 ====================
@@ -126,7 +130,7 @@ public class AgentLoop {
                     boolean success;
                     try {
                         toolResult = toolDef != null
-                                ? toolExecutor.execute(toolDef, arguments, ctx.getCallerRole(), ctx.getUserId())
+                                ? toolExecutor.execute(toolDef, arguments, ctx)
                                 : "{\"error\": \"Unknown tool: " + toolName + "\"}";
                         success = true;
                     } catch (Exception e) {
@@ -146,6 +150,7 @@ public class AgentLoop {
 
                     messages.add(AgentMessage.tool(tc.getId(), toolName, toolResult));
                 }
+                mergeChildTokens(ctx, result);
                 continue;
             }
 
@@ -173,6 +178,7 @@ public class AgentLoop {
         }
 
         result.setElapsedMs(System.currentTimeMillis() - startTime);
+        mergeChildTokens(ctx, result);
         executionLogger.log(ctx, result);
         return result;
     }
@@ -245,7 +251,7 @@ public class AgentLoop {
                         boolean success;
                         try {
                             toolResult = toolDef != null
-                                    ? toolExecutor.execute(toolDef, arguments, ctx.getCallerRole(), ctx.getUserId())
+                                    ? toolExecutor.execute(toolDef, arguments, ctx)
                                     : "{\"error\": \"Unknown tool: " + toolName + "\"}";
                             success = true;
                         } catch (Exception e) {
@@ -265,6 +271,7 @@ public class AgentLoop {
 
                         messages.add(AgentMessage.tool(tc.getId(), toolName, toolResult));
                     }
+                    mergeChildTokens(ctx, result);
                     continue;
                 }
 
@@ -299,6 +306,7 @@ public class AgentLoop {
             if (callback != null) callback.onError(e);
         } finally {
             result.setElapsedMs(System.currentTimeMillis() - startTime);
+            mergeChildTokens(ctx, result);
             executionLogger.log(ctx, result);
         }
     }
@@ -515,14 +523,29 @@ public class AgentLoop {
         return info;
     }
 
-    /** 获取 Agent 绑定的工具 */
+    /** 获取 Agent 绑定的工具（dispatch_agent 的描述动态注入子 Agent 名册） */
     private List<ToolDefinition> getTools(AgentExecutionContext ctx) {
+        List<ToolDefinition> tools;
         if (ctx.getAgentId() != null) {
-            return toolRegistry.getToolsForAgent(ctx.getAgentId(), ctx.getCallerRole());
+            tools = toolRegistry.getToolsForAgent(ctx.getAgentId(), ctx.getCallerRole());
+        } else {
+            tools = toolRegistry.getToolsByNames(
+                    toolRegistry.getAll().stream().map(ToolDefinition::getName).collect(Collectors.toList()),
+                    ctx.getCallerRole());
         }
-        return toolRegistry.getToolsByNames(
-                toolRegistry.getAll().stream().map(ToolDefinition::getName).collect(Collectors.toList()),
-                ctx.getCallerRole());
+        agentCatalog.enrichDispatchTool(tools);
+        return tools;
+    }
+
+    /**
+     * 把子 Agent 消耗的 token 归集进父结果（取走即清零，不会重复累计）
+     * <p>计费口径：call_log 只记父调用一条（含子 Agent 全部消耗），审计日志各自独立
+     */
+    private void mergeChildTokens(AgentExecutionContext ctx, AgentResult result) {
+        long[] child = ctx.takeChildTokens();
+        if (child[0] > 0 || child[1] > 0) {
+            result.addUsage((int) child[0], (int) child[1]);
+        }
     }
 
     /** 构建 messages 列表 */

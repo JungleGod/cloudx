@@ -25,4 +25,7 @@ public interface AgentDefinitionService extends IService<AgentDefinition> {
 
     /** 解绑工具 */
     void unbindTool(Long agentId, Long toolId);
+
+    /** 解密第三方 Agent 的 endpointKey（仅内部接口下发给 ai-agent） */
+    String decryptEndpointKey(String cipher);
 }

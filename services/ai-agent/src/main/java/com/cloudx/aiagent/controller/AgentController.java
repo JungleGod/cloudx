@@ -90,6 +90,19 @@ public class AgentController {
         }
     }
 
+    /** 绑定 Agent 的工具（全量覆盖，代理到 biz-service） */
+    @PutMapping("/api/agents/{id:\\d+}/tools")
+    public ResponseEntity<?> bindAgentTools(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        try {
+            String url = BIZ_URL + "/api/internal/agents/" + id + "/tools";
+            var resp = restTemplate.exchange(url, HttpMethod.PUT,
+                    new HttpEntity<>(body), Map.class);
+            return ResponseEntity.ok(resp.getBody());
+        } catch (Exception e) {
+            return ResponseEntity.status(503).body(Map.of("error", "biz-service 不可用"));
+        }
+    }
+
     // ==================== Agent 执行 ====================
 
     /**
@@ -215,6 +228,54 @@ public class AgentController {
                 "msg", "success",
                 "data", Map.of("tools", tools, "count", tools.size())
         ));
+    }
+
+    // ==================== 工具管理 CRUD（代理到 biz-service，DB 全量视图）====================
+
+    /** 列出全部工具（含停用） */
+    @GetMapping("/api/admin/tools/all")
+    public ResponseEntity<?> listAllTools() {
+        try {
+            var resp = restTemplate.getForEntity(BIZ_URL + "/api/internal/tools", Map.class);
+            return ResponseEntity.ok(resp.getBody());
+        } catch (Exception e) {
+            return ResponseEntity.status(503).body(Map.of("error", "biz-service 不可用"));
+        }
+    }
+
+    /** 创建工具 */
+    @PostMapping("/api/admin/tools/create")
+    public ResponseEntity<?> createTool(@RequestBody Map<String, Object> body) {
+        try {
+            var resp = restTemplate.postForEntity(BIZ_URL + "/api/internal/tools",
+                    new HttpEntity<>(body), Map.class);
+            return ResponseEntity.ok(resp.getBody());
+        } catch (Exception e) {
+            return ResponseEntity.status(503).body(Map.of("error", "biz-service 不可用"));
+        }
+    }
+
+    /** 更新工具 */
+    @PutMapping("/api/admin/tools/{id:\\d+}")
+    public ResponseEntity<?> updateTool(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        try {
+            var resp = restTemplate.exchange(BIZ_URL + "/api/internal/tools/" + id,
+                    HttpMethod.PUT, new HttpEntity<>(body), Map.class);
+            return ResponseEntity.ok(resp.getBody());
+        } catch (Exception e) {
+            return ResponseEntity.status(503).body(Map.of("error", "biz-service 不可用"));
+        }
+    }
+
+    /** 删除工具（级联解除 Agent 绑定） */
+    @DeleteMapping("/api/admin/tools/{id:\\d+}")
+    public ResponseEntity<?> deleteTool(@PathVariable Long id) {
+        try {
+            restTemplate.delete(BIZ_URL + "/api/internal/tools/" + id);
+            return ResponseEntity.ok(Map.of("message", "ok"));
+        } catch (Exception e) {
+            return ResponseEntity.status(503).body(Map.of("error", "biz-service 不可用"));
+        }
     }
 
     /** 热重载工具注册表 */

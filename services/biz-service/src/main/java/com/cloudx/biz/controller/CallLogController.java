@@ -91,16 +91,37 @@ public class CallLogController {
         AgentDefinition agent = agentDefService.getById(id);
         if (agent == null) return R.fail("Agent 不存在");
         List<ToolDefinition> tools = agentDefService.getBoundTools(id);
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("id", agent.getId());
+        data.put("name", agent.getName());
+        data.put("systemPrompt", agent.getSystemPrompt());
+        data.put("model", agent.getModel() != null ? agent.getModel() : "");
+        data.put("temperature", agent.getTemperature());
+        data.put("maxTokens", agent.getMaxTokens());
+        data.put("maxIterations", agent.getMaxIterations());
+        data.put("executionType", agent.getExecutionType() != null ? agent.getExecutionType() : "internal");
+        data.put("endpointUrl", agent.getEndpointUrl() != null ? agent.getEndpointUrl() : "");
+        data.put("dispatchTimeoutMs", agent.getDispatchTimeoutMs() != null ? agent.getDispatchTimeoutMs() : 60000);
+        data.put("status", agent.getStatus());
+        data.put("tools", tools);
+        return R.ok(data);
+    }
+
+    /** 内部接口：第三方 Agent 调度信息（下发明文 Key，仅 ai-agent 内网拉取） */
+    @GetMapping("/api/internal/agents/{id}/dispatch-info")
+    public R<Map<String, Object>> getDispatchInfo(@PathVariable Long id) {
+        AgentDefinition agent = agentDefService.getById(id);
+        if (agent == null) return R.fail("Agent 不存在");
+        if (!"external".equals(agent.getExecutionType())) {
+            return R.fail("非第三方 Agent");
+        }
         return R.ok(Map.of(
                 "id", agent.getId(),
                 "name", agent.getName(),
-                "systemPrompt", agent.getSystemPrompt(),
-                "model", agent.getModel() != null ? agent.getModel() : "",
-                "temperature", agent.getTemperature(),
-                "maxTokens", agent.getMaxTokens(),
-                "maxIterations", agent.getMaxIterations(),
-                "status", agent.getStatus(),
-                "tools", tools
+                "endpointUrl", agent.getEndpointUrl() != null ? agent.getEndpointUrl() : "",
+                "endpointKey", agentDefService.decryptEndpointKey(agent.getEndpointKey()) != null
+                        ? agentDefService.decryptEndpointKey(agent.getEndpointKey()) : "",
+                "dispatchTimeoutMs", agent.getDispatchTimeoutMs() != null ? agent.getDispatchTimeoutMs() : 60000
         ));
     }
 
@@ -110,6 +131,13 @@ public class CallLogController {
         return R.ok(agentDefService.getBoundTools(id));
     }
 
+    /** 内部接口：绑定 Agent 的工具（全量覆盖） */
+    @PutMapping("/api/internal/agents/{id}/tools")
+    public R<Void> bindAgentTools(@PathVariable Long id, @RequestBody Map<String, List<Long>> body) {
+        agentDefService.bindTools(id, body.getOrDefault("toolIds", List.of()));
+        return R.ok();
+    }
+
     /** 内部接口：批量按名称获取工具 */
     @PostMapping("/api/internal/tools/batch")
     public R<List<ToolDefinition>> getToolsByNames(@RequestBody Map<String, List<String>> body) {
@@ -117,13 +145,40 @@ public class CallLogController {
         return R.ok(toolDefService.getByNames(names));
     }
 
-    /** 内部接口：列出所有 Agent */
+    /** 内部接口：列出全部工具（含停用，管理页用） */
+    @GetMapping("/api/internal/tools")
+    public R<List<ToolDefinition>> listAllTools() {
+        return R.ok(toolDefService.list());
+    }
+
+    /** 内部接口：创建工具（built-in 类别拒绝） */
+    @PostMapping("/api/internal/tools")
+    public R<Void> createTool(@RequestBody ToolDefinition tool) {
+        toolDefService.createTool(tool);
+        return R.ok();
+    }
+
+    /** 内部接口：更新工具 */
+    @PutMapping("/api/internal/tools/{id}")
+    public R<Void> updateTool(@PathVariable Long id, @RequestBody ToolDefinition tool) {
+        toolDefService.updateTool(id, tool);
+        return R.ok();
+    }
+
+    /** 内部接口：删除工具（级联解除 Agent 绑定） */
+    @DeleteMapping("/api/internal/tools/{id}")
+    public R<Void> deleteTool(@PathVariable Long id) {
+        toolDefService.deleteTool(id);
+        return R.ok();
+    }
+
+    /** 内部接口：列出所有 Agent（endpointKey 不下发，明文仅经 /dispatch-info 内网下发） */
     @GetMapping("/api/internal/agents")
     public R<List<AgentDefinition>> listAgents(@RequestParam(required = false) Long userId) {
-        if (userId != null) {
-            return R.ok(agentDefService.listByUser(userId));
-        }
-        return R.ok(agentDefService.list());
+        List<AgentDefinition> agents = userId != null
+                ? agentDefService.listByUser(userId) : agentDefService.list();
+        agents.forEach(a -> a.setEndpointKey(null));
+        return R.ok(agents);
     }
 
     /** 内部接口：创建 Agent */

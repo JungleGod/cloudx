@@ -12,6 +12,8 @@ import {
   ApiOutlined,
   TeamOutlined,
   RobotOutlined,
+  NodeIndexOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { Spin } from 'antd';
@@ -45,6 +47,8 @@ export default function AppLayout() {
     ...(role === 'admin' ? [
       { key: '/admin', icon: <TeamOutlined />, label: '用户管理' },
       { key: '/admin/models', icon: <RobotOutlined />, label: '模型管理' },
+      { key: '/admin/agents', icon: <NodeIndexOutlined />, label: 'Agent 管理' },
+      { key: '/admin/tools', icon: <ToolOutlined />, label: '工具管理' },
     ] : []),
   ];
 

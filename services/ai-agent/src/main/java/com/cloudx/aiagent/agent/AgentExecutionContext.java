@@ -12,6 +12,14 @@ import java.util.List;
 @Builder
 public class AgentExecutionContext {
 
+    /** 编排深度（0=顶层 Agent，1=被 dispatch_agent 调度的子 Agent），防止无限递归 */
+    @Builder.Default
+    private int depth = 0;
+
+    /** 子 Agent 消耗的 token 归集器 [input, output]，dispatch_agent 执行时累加，随父调用统一计费 */
+    @Builder.Default
+    private long[] childTokens = new long[2];
+
     /** 平台用户 ID */
     private Long userId;
 
@@ -62,5 +70,18 @@ public class AgentExecutionContext {
 
     public int getEffectiveMaxIterations() {
         return maxIterations != null ? maxIterations : 5;
+    }
+
+    /** 累加子 Agent 消耗的 token */
+    public void addChildTokens(int input, int output) {
+        childTokens[0] += input;
+        childTokens[1] += output;
+    }
+
+    /** 取走子 Agent 累计的 token（取后清零，保证归集不重复） */
+    public long[] takeChildTokens() {
+        long[] taken = childTokens;
+        childTokens = new long[2];
+        return taken;
     }
 }

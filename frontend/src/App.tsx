@@ -11,6 +11,8 @@ import ApiKeysPage from './pages/ApiKeysPage';
 import ChatPage from './pages/ChatPage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import AdminModelsPage from './pages/AdminModelsPage';
+import AdminAgentsPage from './pages/AdminAgentsPage';
+import AdminToolsPage from './pages/AdminToolsPage';
 
 export default function App() {
   return (
@@ -32,6 +34,8 @@ export default function App() {
               <Route path="/playground" element={<Navigate to="/chat" replace />} />
               <Route path="/admin" element={<AdminUsersPage />} />
               <Route path="/admin/models" element={<AdminModelsPage />} />
+              <Route path="/admin/agents" element={<AdminAgentsPage />} />
+              <Route path="/admin/tools" element={<AdminToolsPage />} />
             </Route>
 
             {/* 默认跳转 */}

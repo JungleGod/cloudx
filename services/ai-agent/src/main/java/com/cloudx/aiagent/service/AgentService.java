@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -21,25 +22,25 @@ public class AgentService {
 
     private final AgentLoop agentLoop;
     private final ToolRegistry toolRegistry;
+    private final AgentCatalog agentCatalog;
     private final AgentExecutionLogger executionLogger;
     private final CallLogClient callLogClient;
+    private final ExternalAgentClient externalAgentClient;
 
     /**
-     * 同步执行 Agent
+     * 同步执行 Agent（external 类型第三方 Agent 直接 HTTP 委托）
      */
     public AgentResult execute(AgentExecutionContext ctx) {
         log.info("Agent [{}] sync execution for user {}", ctx.getAgentName(), ctx.getUserId());
+
+        // 第三方 Agent 直连：不走本地 AgentLoop
+        ExternalAgentClient.ExternalAgentTarget target = resolveExternalTarget(ctx);
+        if (target != null) {
+            return executeExternal(ctx, target);
+        }
+
         AgentResult result = agentLoop.execute(ctx, null);
-        // 同步 Agent 执行同样记入调用日志，用于成本/额度统计（真实 token 来自模型 usage）
-        int tokensInput = result.getInputTokens() > 0 ? result.getInputTokens()
-                : (ctx.getUserMessage() != null ? ctx.getUserMessage().length() / 2 : 0);
-        int tokensOutput = result.getOutputTokens() > 0 ? result.getOutputTokens()
-                : (result.getAnswer() != null ? result.getAnswer().length() / 2 : 0);
-        callLogClient.record(ctx.getUserId(),
-                ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
-                ctx.getUserMessage() != null ? ctx.getUserMessage() : "",
-                result.getAnswer() != null ? result.getAnswer() : "",
-                tokensInput, tokensOutput, result.getElapsedMs(), true, null);
+        recordSyncCallLog(ctx, result, true, null);
         return result;
     }
 
@@ -49,15 +50,117 @@ public class AgentService {
     public void executeStream(AgentExecutionContext ctx, AgentStreamCallback callback) {
         log.info("Agent [{}] stream execution for user {}", ctx.getAgentName(), ctx.getUserId());
 
-        // 包装回调：记录调用日志
-        AgentStreamCallback wrapped = new AgentStreamCallback() {
+        AgentStreamCallback wrapped = buildLoggingCallback(ctx, callback);
+
+        // 第三方 Agent 直连：HTTP 委托，结果以整体 token 回放给前端
+        ExternalAgentClient.ExternalAgentTarget target = resolveExternalTarget(ctx);
+        if (target != null) {
+            streamExternal(ctx, target, wrapped);
+            return;
+        }
+
+        agentLoop.executeStream(ctx, wrapped);
+    }
+
+    // ==================== 第三方 Agent（external）====================
+
+    /** 判断目标 Agent 是否第三方（external），是则返回调度目标 */
+    private ExternalAgentClient.ExternalAgentTarget resolveExternalTarget(AgentExecutionContext ctx) {
+        Map<String, Object> def = agentCatalog.getById(ctx.getAgentId());
+        if (def == null && ctx.getAgentName() != null) {
+            def = agentCatalog.getByName(ctx.getAgentName());
+        }
+        if (def == null || !"external".equals(def.get("executionType"))) {
+            return null;
+        }
+        Object id = def.get("id");
+        Long agentId = id instanceof Number n ? n.longValue() : null;
+        return agentCatalog.getExternalTarget(agentId);
+    }
+
+    /** 第三方 Agent 同步执行：HTTP 委托 */
+    private AgentResult executeExternal(AgentExecutionContext ctx, ExternalAgentClient.ExternalAgentTarget target) {
+        long start = System.currentTimeMillis();
+        ExternalAgentClient.ExternalResult ext = callExternal(ctx, target);
+
+        AgentResult result = AgentResult.builder()
+                .iterations(1)
+                .interrupted(false)
+                .inputTokens(ext.inputTokens())
+                .outputTokens(ext.outputTokens())
+                .totalTokens(ext.inputTokens() + ext.outputTokens())
+                .build();
+        result.setAnswer(ext.success() ? ext.answer() : "第三方Agent调用失败: " + ext.error());
+        result.setElapsedMs(System.currentTimeMillis() - start);
+        executionLogger.log(ctx, result);
+
+        if (ext.success()) {
+            recordSyncCallLog(ctx, result, true, null);
+        } else {
+            recordSyncCallLog(ctx, result, false, ext.error());
+        }
+        return result;
+    }
+
+    /** 第三方 Agent 流式执行：结果以整体 token 回放（对方不支持我们的 SSE 透传） */
+    private void streamExternal(AgentExecutionContext ctx, ExternalAgentClient.ExternalAgentTarget target,
+                                AgentStreamCallback wrapped) {
+        try {
+            ExternalAgentClient.ExternalResult ext = callExternal(ctx, target);
+            if (ext.success()) {
+                wrapped.onThinking();
+                if (!ext.answer().isEmpty()) {
+                    wrapped.onToken(ext.answer());
+                }
+                wrapped.onUsage(ext.inputTokens(), ext.outputTokens());
+                wrapped.onDone(ext.answer());
+            } else {
+                wrapped.onError(new RuntimeException(ext.error()));
+            }
+        } catch (Exception e) {
+            log.error("External agent [{}] stream failed: {}", target.agentName(), e.getMessage());
+            wrapped.onError(e);
+        }
+    }
+
+    /** 组装消息并调用第三方 Agent（直连场景带历史上下文） */
+    private ExternalAgentClient.ExternalResult callExternal(AgentExecutionContext ctx,
+                                                            ExternalAgentClient.ExternalAgentTarget target) {
+        List<AgentMessage> messages = new ArrayList<>();
+        if (ctx.getHistory() != null) {
+            messages.addAll(ctx.getHistory());
+        }
+        messages.add(AgentMessage.user(ctx.getUserMessage() != null ? ctx.getUserMessage() : ""));
+        return externalAgentClient.execute(target, messages, ctx.getUserId());
+    }
+
+    // ==================== 调用日志 ====================
+
+    /** 同步路径统一记调用日志（真实 token 优先，缺失时按字符数估算） */
+    private void recordSyncCallLog(AgentExecutionContext ctx, AgentResult result, boolean success, String error) {
+        int tokensInput = result.getInputTokens() > 0 ? result.getInputTokens()
+                : (ctx.getUserMessage() != null ? ctx.getUserMessage().length() / 2 : 0);
+        int tokensOutput = result.getOutputTokens() > 0 ? result.getOutputTokens()
+                : (result.getAnswer() != null ? result.getAnswer().length() / 2 : 0);
+        callLogClient.record(ctx.getUserId(),
+                ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
+                ctx.getUserMessage() != null ? ctx.getUserMessage() : "",
+                result.getAnswer() != null ? result.getAnswer() : "",
+                tokensInput, tokensOutput, result.getElapsedMs(), success, error);
+    }
+
+    /** 包装回调：记录调用日志 + 事件转发（call_log 用于成本/额度统计） */
+    private AgentStreamCallback buildLoggingCallback(AgentExecutionContext ctx, AgentStreamCallback callback) {
+        return new AgentStreamCallback() {
             private final StringBuilder fullContent = new StringBuilder();
             private final long start = System.currentTimeMillis();
-            // [input, output]，由 AgentLoop 在 onDone 前通过 onUsage 回填
+            // [input, output]，由 AgentLoop / external 分支在 onDone 前通过 onUsage 回填
             private final int[] usage = new int[2];
 
             @Override
-            public void onThinking() { callback.onThinking(); }
+            public void onThinking() {
+                callback.onThinking();
+            }
 
             @Override
             public void onToolCallStart(String toolName, String callId) {
@@ -116,8 +219,6 @@ public class AgentService {
                 callback.onError(error);
             }
         };
-
-        agentLoop.executeStream(ctx, wrapped);
     }
 
     // ==================== 工具查询 ====================
@@ -134,9 +235,10 @@ public class AgentService {
         return toolRegistry.getToolsForAgent(agentId, callerRole);
     }
 
-    /** 热重载工具注册表 */
+    /** 热重载工具注册表 + 子 Agent 名册 */
     public void reloadTools() {
         toolRegistry.reload();
-        log.info("Tool registry reloaded");
+        agentCatalog.reload();
+        log.info("Tool registry and agent catalog reloaded");
     }
 }

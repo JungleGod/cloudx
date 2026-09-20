@@ -140,6 +140,32 @@ function renderToolResult(resultJson: string): { element: React.ReactNode; title
   return null; // 不适合结构化展示，回退到 JSON
 }
 
+/**
+ * dispatch_agent 结果渲染器 — 展示子 Agent 的名字和 Markdown 回答
+ */
+function renderDispatchResult(resultJson: string): { element: React.ReactNode; title: string } | null {
+  let obj: any;
+  try { obj = JSON.parse(resultJson); } catch { return null; }
+  if (!obj || typeof obj !== 'object' || !obj.agent) return null;
+  const answer: string = obj.answer || '';
+  return {
+    title: `${obj.agent} · ${obj.toolCalls ?? 0} 次工具调用`,
+    element: (
+      <div className="markdown-body" style={{ wordBreak: 'break-word' }}>
+        <ReactMarkdown>{answer}</ReactMarkdown>
+      </div>
+    ),
+  };
+}
+
+/** 解析 dispatch_agent 的参数，取出子 Agent 名 */
+function parseDispatchAgentName(argumentsJson: string): string | null {
+  try {
+    const obj = JSON.parse(argumentsJson);
+    return obj?.agent_name ?? null;
+  } catch { return null; }
+}
+
 interface AgentPageProps {
   activeConv: Conversation | null;
   onConvMutated: () => void;
@@ -447,7 +473,11 @@ export default function AgentPage({
               {msg.toolSteps && msg.toolSteps.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
                   {msg.toolSteps.map((step, si) => {
-                    const rendered = step.success ? renderToolResult(step.result || '') : null;
+                    const isDispatch = step.toolName === 'dispatch_agent';
+                    const dispatchName = isDispatch ? parseDispatchAgentName(step.arguments || '') : null;
+                    const rendered = step.success
+                      ? (isDispatch ? renderDispatchResult(step.result || '') : renderToolResult(step.result || ''))
+                      : null;
                     return (
                       <div key={si} style={{ marginBottom: 8 }}>
                         {/* 标题栏 */}
@@ -461,8 +491,10 @@ export default function AgentPage({
                             ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
                             : <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 12 }} />
                           }
-                          <Tag color={step.success ? 'green' : 'red'} style={{ margin: 0 }}>
-                            <ToolOutlined /> {step.toolName}
+                          <Tag color={isDispatch ? 'blue' : (step.success ? 'green' : 'red')} style={{ margin: 0 }}>
+                            {isDispatch
+                              ? <>🤖 调度子Agent{dispatchName ? ` · ${dispatchName}` : ''}</>
+                              : <><ToolOutlined /> {step.toolName}</>}
                           </Tag>
                           <Text type="secondary" style={{ fontSize: 11 }}>{step.elapsedMs}ms</Text>
                           {rendered && <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>{rendered.title}</Text>}

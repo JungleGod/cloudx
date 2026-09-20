@@ -9,6 +9,7 @@ import com.cloudx.biz.mapper.AgentDefinitionMapper;
 import com.cloudx.biz.mapper.AgentToolBindingMapper;
 import com.cloudx.biz.mapper.ToolDefinitionMapper;
 import com.cloudx.biz.service.AgentDefinitionService;
+import com.cloudx.biz.util.AesUtil;
 import com.cloudx.common.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,8 +42,13 @@ public class AgentDefinitionServiceImpl extends ServiceImpl<AgentDefinitionMappe
         if (agent.getMaxTokens() == null) agent.setMaxTokens(2048);
         if (agent.getMaxIterations() == null) agent.setMaxIterations(5);
         if (agent.getStatus() == null) agent.setStatus(1);
+        if (agent.getExecutionType() == null || agent.getExecutionType().isBlank()) {
+            agent.setExecutionType("internal");
+        }
+        agent.setEndpointKey(encryptIfPresent(agent.getEndpointKey()));
         save(agent);
-        log.info("Agent created: id={}, name={}", agent.getId(), agent.getName());
+        log.info("Agent created: id={}, name={}, executionType={}", agent.getId(), agent.getName(), agent.getExecutionType());
+        agent.setEndpointKey(null); // 密文不下发
         return agent;
     }
 
@@ -53,8 +59,31 @@ public class AgentDefinitionServiceImpl extends ServiceImpl<AgentDefinitionMappe
         if (existing == null) {
             throw new BizException("Agent 不存在");
         }
+        // endpointKey：传了新值则重新加密落库；没传（null）则 MyBatis-Plus 跳过该列，保留旧密文
+        if (agent.getEndpointKey() != null && !agent.getEndpointKey().isBlank()) {
+            agent.setEndpointKey(AesUtil.encrypt(agent.getEndpointKey()));
+        }
         agent.setId(id);
         updateById(agent);
+    }
+
+    /** 解密第三方 Key（内部接口下发明文给 ai-agent，仅内网使用） */
+    public String decryptEndpointKey(String cipher) {
+        if (cipher == null || cipher.isBlank()) return null;
+        try {
+            return AesUtil.decrypt(cipher);
+        } catch (Exception e) {
+            log.warn("Decrypt endpoint_key failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String encryptIfPresent(String plain) {
+        return (plain != null && !isBlankSafe(plain)) ? AesUtil.encrypt(plain) : null;
+    }
+
+    private boolean isBlankSafe(String s) {
+        return s.trim().isEmpty();
     }
 
     @Override

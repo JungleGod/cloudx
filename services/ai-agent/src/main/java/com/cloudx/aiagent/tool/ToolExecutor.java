@@ -1,5 +1,6 @@
 package com.cloudx.aiagent.tool;
 
+import com.cloudx.aiagent.agent.AgentExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -15,16 +16,20 @@ public class ToolExecutor {
     private final BuiltInToolHandler builtInHandler;
     private final HttpToolHandler httpHandler;
     private final InternalApiToolHandler internalApiHandler;
+    private final AgentDispatchHandler agentDispatchHandler;
 
-    /** 执行工具调用（带完整定义） */
-    public String execute(ToolDefinition tool, String argumentsJson, String callerRole, Long userId)
+    /** 执行工具调用（带完整定义和执行上下文） */
+    public String execute(ToolDefinition tool, String argumentsJson, AgentExecutionContext ctx)
             throws ToolExecutionException {
         long start = System.currentTimeMillis();
         try {
             String result = switch (tool.getCategory()) {
-                case "built-in"     -> builtInHandler.execute(tool.getBuiltinHandler(), argumentsJson, callerRole, userId);
+                case "built-in"     -> builtInHandler.execute(tool.getBuiltinHandler(), argumentsJson,
+                        ctx.getCallerRole(), ctx.getUserId());
                 case "http"         -> httpHandler.execute(tool, argumentsJson);
-                case "internal-api" -> internalApiHandler.execute(tool, argumentsJson, callerRole, userId);
+                case "internal-api" -> internalApiHandler.execute(tool, argumentsJson,
+                        ctx.getCallerRole(), ctx.getUserId());
+                case "agent"        -> agentDispatchHandler.execute(argumentsJson, ctx);
                 default -> throw new ToolExecutionException("Unknown tool category: " + tool.getCategory());
             };
             long elapsed = System.currentTimeMillis() - start;
