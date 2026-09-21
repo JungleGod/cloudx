@@ -40,7 +40,9 @@ public class ChatService {
         int tokensInput = result.inputTokens() > 0 ? result.inputTokens() : fullPrompt.length() / 2;
         int tokensOutput = result.outputTokens() > 0 ? result.outputTokens() : result.reply().length() / 2;
 
-        callLogClient.record(userId, result.model(), fullPrompt, result.reply(),
+        // model 列记实际路由模型（统计/计价按实际模型），requestedModel 记客户端请求（auto/指定名）
+        String requestedModel = (model != null && !model.isBlank()) ? model : "auto";
+        callLogClient.record(userId, result.model(), requestedModel, fullPrompt, result.reply(),
                 tokensInput, tokensOutput, latency, true, null);
 
         return result;
@@ -94,9 +96,17 @@ public class ChatService {
         long start = System.currentTimeMillis();
         String[] replyHolder = new String[1]; // 用于在回调间传递完整回复
         replyHolder[0] = "";
+        String[] routedModelHolder = new String[1]; // 路由器宣告的实际模型（failover 会更新）
+        routedModelHolder[0] = null;
+        String requestedModel = (model != null && !model.isBlank()) ? model : "auto";
 
         // 包装回调：累加 token + 完成后记录调用日志
         StreamCallback wrapped = new StreamCallback() {
+            @Override
+            public void onRouted(String modelName) {
+                routedModelHolder[0] = modelName;
+            }
+
             @Override
             public void onToken(String token) {
                 replyHolder[0] += token;
@@ -107,10 +117,11 @@ public class ChatService {
             public void onComplete(int inputTokens, int outputTokens) {
                 long latency = System.currentTimeMillis() - start;
                 String reply = replyHolder[0];
-                String usedModel = (model != null && !model.isBlank()) ? model : "auto";
+                // 优先取路由器宣告的实际模型（含 failover 切换后的），未宣告时退回请求模型
+                String usedModel = routedModelHolder[0] != null ? routedModelHolder[0] : requestedModel;
                 int tokensInput = inputTokens > 0 ? inputTokens : fullPrompt.length() / 2;
                 int tokensOutput = outputTokens > 0 ? outputTokens : reply.length() / 2;
-                callLogClient.record(userId, usedModel, fullPrompt, reply,
+                callLogClient.record(userId, usedModel, requestedModel, fullPrompt, reply,
                         tokensInput, tokensOutput, latency, true, null);
                 callback.onComplete(inputTokens, outputTokens);
             }
@@ -119,10 +130,10 @@ public class ChatService {
             public void onError(Throwable error) {
                 long latency = System.currentTimeMillis() - start;
                 String reply = replyHolder[0];
-                String usedModel = (model != null && !model.isBlank()) ? model : "auto";
+                String usedModel = routedModelHolder[0] != null ? routedModelHolder[0] : requestedModel;
                 int tokensInput = fullPrompt.length() / 2;
                 int tokensOutput = reply.length() / 2;
-                callLogClient.record(userId, usedModel, fullPrompt, reply,
+                callLogClient.record(userId, usedModel, requestedModel, fullPrompt, reply,
                         tokensInput, tokensOutput, latency, false,
                         error != null ? error.getMessage() : "unknown");
                 callback.onError(error);
@@ -139,7 +150,8 @@ public class ChatService {
         int tokensInput = result.inputTokens() > 0 ? result.inputTokens() : text.length() / 2;
         int tokensOutput = result.outputTokens() > 0 ? result.outputTokens() : result.reply().length() / 2;
         // 记录调用日志（真实 token 来自模型 usage）
-        callLogClient.record(userId, result.model(), text, result.reply(),
+        String requestedModel = (model != null && !model.isBlank()) ? model : "auto";
+        callLogClient.record(userId, result.model(), requestedModel, text, result.reply(),
                 tokensInput, tokensOutput, 0, true, null);
         return result;
     }

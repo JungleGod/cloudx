@@ -144,6 +144,7 @@ public class AgentService {
                 : (result.getAnswer() != null ? result.getAnswer().length() / 2 : 0);
         callLogClient.record(ctx.getUserId(),
                 ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
+                ctx.getModelName() != null ? ctx.getModelName() : "auto",
                 ctx.getUserMessage() != null ? ctx.getUserMessage() : "",
                 result.getAnswer() != null ? result.getAnswer() : "",
                 tokensInput, tokensOutput, result.getElapsedMs(), success, error);
@@ -201,6 +202,7 @@ public class AgentService {
                 int tokensInput = usage[0] > 0 ? usage[0] : ctx.getUserMessage().length() / 2;
                 int tokensOutput = usage[1] > 0 ? usage[1] : fullContent.length() / 2;
                 callLogClient.record(ctx.getUserId(), ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
+                        ctx.getModelName() != null ? ctx.getModelName() : "auto",
                         ctx.getUserMessage(), fullContent.toString(),
                         tokensInput, tokensOutput,
                         latency, true, null);
@@ -213,6 +215,7 @@ public class AgentService {
                 int tokensInput = usage[0] > 0 ? usage[0] : ctx.getUserMessage().length() / 2;
                 int tokensOutput = usage[1] > 0 ? usage[1] : fullContent.length() / 2;
                 callLogClient.record(ctx.getUserId(), ctx.getActualModelName() != null ? ctx.getActualModelName() : "agent",
+                        ctx.getModelName() != null ? ctx.getModelName() : "auto",
                         ctx.getUserMessage(), fullContent.toString(),
                         tokensInput, tokensOutput,
                         latency, false, error.getMessage());

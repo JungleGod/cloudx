@@ -26,12 +26,13 @@ public class CallLogClient {
         this.bizServiceUrl = bizServiceUrl;
     }
 
-    public void record(Long userId, String model, String requestBody, String responseBody,
+    public void record(Long userId, String model, String requestedModel, String requestBody, String responseBody,
                        int tokensInput, int tokensOutput, long latencyMs, boolean success, String errorMsg) {
         try {
             Map<String, Object> body = Map.of(
                     "userId", userId != null ? userId : 0,
                     "model", model,
+                    "requestedModel", requestedModel != null ? requestedModel : "",
                     "requestBody", requestBody,
                     "responseBody", responseBody,
                     "tokensInput", tokensInput,

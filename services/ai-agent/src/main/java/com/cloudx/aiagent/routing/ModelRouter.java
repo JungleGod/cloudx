@@ -187,6 +187,9 @@ public class ModelRouter {
                 provider.getModelName(), strategy,
                 message.length() > 50 ? message.substring(0, 50) : message);
 
+        // 向上层宣告实际路由的模型（调用日志按实际模型记录/计价）
+        callback.onRouted(provider.getModelName());
+
         try {
             provider.streamChat(message, callback);
             provider.recordSuccess();
@@ -200,6 +203,7 @@ public class ModelRouter {
                 ModelProvider fallback = providers.get(config.getFallback());
                 if (fallback != null && fallback.isAvailable()) {
                     log.warn("Stream falling back to [{}]", fallback.getModelName());
+                    callback.onRouted(fallback.getModelName());
                     try {
                         fallback.streamChat(message, callback);
                         fallback.recordSuccess();

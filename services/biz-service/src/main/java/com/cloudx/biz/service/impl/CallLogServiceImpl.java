@@ -25,7 +25,7 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
     private final QuotaService quotaService;
 
     @Override
-    public void record(Long userId, Long apiKeyId, Long interfaceId, String model,
+    public void record(Long userId, Long apiKeyId, Long interfaceId, String model, String requestedModel,
                        String requestBody, String responseBody,
                        int tokensInput, int tokensOutput,
                        long latencyMs, boolean success, String errorMsg) {
@@ -43,6 +43,7 @@ public class CallLogServiceImpl extends ServiceImpl<CallLogMapper, CallLog> impl
         log.setApiKeyId(apiKeyId);
         log.setInterfaceId(interfaceId);
         log.setModel(model);
+        log.setRequestedModel(requestedModel);
         log.setRequestBody(requestBody);
         log.setResponseBody(responseBody);
         log.setTokensInput(tokensInput);

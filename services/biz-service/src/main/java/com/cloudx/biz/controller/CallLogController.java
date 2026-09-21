@@ -44,6 +44,7 @@ public class CallLogController {
     public R<Void> record(@RequestBody Map<String, Object> body) {
         Long userId = toLong(body.get("userId"));
         String model = (String) body.getOrDefault("model", "unknown");
+        String requestedModel = (String) body.getOrDefault("requestedModel", "");
         String requestBody = (String) body.getOrDefault("requestBody", "");
         String responseBody = (String) body.getOrDefault("responseBody", "");
         int tokensInput = toInt(body.get("tokensInput"));
@@ -53,7 +54,7 @@ public class CallLogController {
         String errorMsg = (String) body.getOrDefault("errorMsg", "");
 
         // apiKeyId/interfaceId 传 0：在线调试等场景没有 API Key，用 0 表示非 Key 调用
-        callLogService.record(userId, 0L, null, model,
+        callLogService.record(userId, 0L, null, model, requestedModel,
                 requestBody, responseBody, tokensInput, tokensOutput, latencyMs, success, errorMsg);
         return R.ok();
     }

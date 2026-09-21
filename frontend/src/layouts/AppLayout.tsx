@@ -14,6 +14,9 @@ import {
   RobotOutlined,
   NodeIndexOutlined,
   ToolOutlined,
+  FileSearchOutlined,
+  AccountBookOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { Spin } from 'antd';
@@ -49,6 +52,9 @@ export default function AppLayout() {
       { key: '/admin/models', icon: <RobotOutlined />, label: '模型管理' },
       { key: '/admin/agents', icon: <NodeIndexOutlined />, label: 'Agent 管理' },
       { key: '/admin/tools', icon: <ToolOutlined />, label: '工具管理' },
+      { key: '/admin/calllogs', icon: <FileSearchOutlined />, label: '调用记录' },
+      { key: '/admin/billing', icon: <AccountBookOutlined />, label: '账单汇总' },
+      { key: '/admin/agentlogs', icon: <AuditOutlined />, label: 'Agent 审计' },
     ] : []),
   ];
 

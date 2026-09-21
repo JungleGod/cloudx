@@ -5,6 +5,12 @@ package com.cloudx.aiagent.provider;
  */
 public interface StreamCallback {
 
+    /**
+     * 路由器宣告实际选中的模型（failover 切换时可能再次触发）
+     * @param modelName 实际承接本次调用的模型名
+     */
+    default void onRouted(String modelName) {}
+
     /** LLM 返回了一个 token 片段 */
     void onToken(String token);
 

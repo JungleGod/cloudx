@@ -13,6 +13,9 @@ import AdminUsersPage from './pages/AdminUsersPage';
 import AdminModelsPage from './pages/AdminModelsPage';
 import AdminAgentsPage from './pages/AdminAgentsPage';
 import AdminToolsPage from './pages/AdminToolsPage';
+import AdminCallLogsPage from './pages/AdminCallLogsPage';
+import AdminBillPage from './pages/AdminBillPage';
+import AdminAgentLogsPage from './pages/AdminAgentLogsPage';
 
 export default function App() {
   return (
@@ -36,6 +39,9 @@ export default function App() {
               <Route path="/admin/models" element={<AdminModelsPage />} />
               <Route path="/admin/agents" element={<AdminAgentsPage />} />
               <Route path="/admin/tools" element={<AdminToolsPage />} />
+              <Route path="/admin/calllogs" element={<AdminCallLogsPage />} />
+              <Route path="/admin/billing" element={<AdminBillPage />} />
+              <Route path="/admin/agentlogs" element={<AdminAgentLogsPage />} />
             </Route>
 
             {/* 默认跳转 */}

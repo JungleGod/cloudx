@@ -16,6 +16,8 @@ public class CallLog {
     private Long apiKeyId;
     private Long interfaceId;
     private String model;
+    /** 客户端请求的模型名（auto=自动路由），实际模型存 model 列 */
+    private String requestedModel;
     private String requestBody;
     private String responseBody;
     private Integer tokensInput;
