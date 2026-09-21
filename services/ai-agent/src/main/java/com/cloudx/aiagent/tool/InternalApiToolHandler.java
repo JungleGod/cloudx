@@ -1,5 +1,6 @@
 package com.cloudx.aiagent.tool;
 
+import com.cloudx.aiagent.config.InternalAuthInterceptor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
@@ -15,8 +16,13 @@ import java.util.Map;
 @Component
 public class InternalApiToolHandler {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
     private final String bizServiceUrl = "http://localhost:8081";
+
+    public InternalApiToolHandler(InternalAuthInterceptor internalAuth) {
+        this.restTemplate = new RestTemplate();
+        this.restTemplate.getInterceptors().add(internalAuth);
+    }
 
     /**
      * 执行内部 API 调用

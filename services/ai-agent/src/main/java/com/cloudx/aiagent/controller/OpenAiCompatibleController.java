@@ -209,8 +209,9 @@ public class OpenAiCompatibleController {
             @Override
             public void onDone(String fullReply) {
                 try {
-                    // 如果有 tool_calls，先发送带 tool_calls 的 chunk
                     if (!toolCallIds.isEmpty()) {
+                        // 客户端工具模式：tool_calls 是本轮回调的最终产出，finish_reason 必须是
+                        // tool_calls（客户端执行后发起下一轮），不能追加 stop chunk 覆盖语义
                         List<Map<String, Object>> toolCalls = new ArrayList<>();
                         for (int idx : toolCallIds.keySet()) {
                             Map<String, Object> fn = new LinkedHashMap<>();
@@ -227,12 +228,13 @@ public class OpenAiCompatibleController {
                                 true, "tool_calls", toolCalls);
                         emitter.send(SseEmitter.event().data(
                                 objectMapper.writeValueAsString(chunk), MediaType.APPLICATION_JSON));
+                    } else {
+                        // 发送最终 stop chunk
+                        Map<String, Object> finalChunk = buildAgentChunk(requestId, displayModel, null,
+                                true, "stop", null);
+                        emitter.send(SseEmitter.event().data(
+                                objectMapper.writeValueAsString(finalChunk), MediaType.APPLICATION_JSON));
                     }
-                    // 发送最终 stop chunk
-                    Map<String, Object> finalChunk = buildAgentChunk(requestId, displayModel, null,
-                            true, "stop", null);
-                    emitter.send(SseEmitter.event().data(
-                            objectMapper.writeValueAsString(finalChunk), MediaType.APPLICATION_JSON));
                     emitter.send(SseEmitter.event().data("[DONE]"));
                     emitter.complete();
                 } catch (IOException e) { emitter.completeWithError(e); }
@@ -347,6 +349,10 @@ public class OpenAiCompatibleController {
 
         InternalRequest internal;
         try {
+            // 带 tools → Agent「客户端执行」协议（Claude Code 等 Anthropic 客户端自己执行工具）
+            if (request.getTools() != null && !request.getTools().isEmpty()) {
+                return handleAnthropicAgentRequest(request, auth);
+            }
             internal = anthropicAdapter.toInternal(request);
         } catch (IllegalArgumentException e) {
             return anthropicError(400, "invalid_request_error", e.getMessage());
@@ -425,6 +431,137 @@ public class OpenAiCompatibleController {
         new Thread(() -> chatService.chatStream(
                 fullPrompt, internal.history(), internal.model(), null, auth.userId(), callback)).start();
 
+        return emitter;
+    }
+
+    // ==================== /v1/messages Agent 模式（客户端执行协议） ====================
+
+    /** 带 tools 的 Anthropic 请求走 Agent 循环（clientTools 透传，平台不代执行） */
+    private Object handleAnthropicAgentRequest(MessagesRequest request, AuthResult auth) {
+        AgentExecutionContext ctx;
+        try {
+            ctx = anthropicAdapter.toAgentContext(request, auth);
+        } catch (IllegalArgumentException e) {
+            return anthropicError(400, "invalid_request_error", e.getMessage());
+        }
+
+        boolean stream = request.getStream() != null && request.getStream();
+        String displayModel = (request.getModel() == null || "auto".equalsIgnoreCase(request.getModel()))
+                ? "auto" : request.getModel();
+
+        if (stream) {
+            return agentAnthropicStream(ctx, auth, displayModel);
+        }
+        return agentAnthropicSync(ctx, auth, displayModel);
+    }
+
+    /** Agent 同步执行 → Anthropic MessagesResponse（tool_use 块） */
+    private ResponseEntity<?> agentAnthropicSync(AgentExecutionContext ctx, AuthResult auth, String displayModel) {
+        String requestId = "msg_" + UUID.randomUUID().toString().substring(0, 24);
+        AgentResult result = agentService.execute(ctx);
+
+        return ResponseEntity.ok()
+                .header("X-Routed-Model", displayModel)
+                .body(anthropicAdapter.toAgentResponse(result, requestId, displayModel));
+    }
+
+    /**
+     * Agent 流式执行 → Anthropic SSE
+     * <p>
+     * 事件序列：message_start → [content_block_start(text) → text_delta × N → content_block_stop]
+     *          → [content_block_start(tool_use) → input_json_delta × N → content_block_stop] × M
+     *          → message_delta(stop_reason=tool_use|end_turn) → message_stop
+     */
+    private SseEmitter agentAnthropicStream(AgentExecutionContext ctx, AuthResult auth, String displayModel) {
+        String requestId = "msg_" + UUID.randomUUID().toString().substring(0, 24);
+        SseEmitter emitter = new SseEmitter(300_000L);
+
+        AgentStreamCallback callback = new AgentStreamCallback() {
+            private boolean messageStarted = false;
+            private int nextBlockIndex = 0;       // 下一个 content block 的 index
+            private int openBlockIndex = -1;      // 当前未关闭的 block
+            private boolean textBlockOpen = false;
+            private final StringBuilder fullContent = new StringBuilder();
+            private int outputTokens = 0;
+            private boolean hasToolUse = false;
+
+            private void send(String json) {
+                try {
+                    emitter.send(SseEmitter.event().data(json, MediaType.APPLICATION_JSON));
+                } catch (IOException e) { log.debug("SSE send failed"); }
+            }
+
+            private void ensureStarted() {
+                if (!messageStarted) {
+                    send(anthropicAdapter.sseMessageStart(requestId, displayModel));
+                    messageStarted = true;
+                }
+            }
+
+            private void closeOpenBlock() {
+                if (openBlockIndex >= 0) {
+                    send(anthropicAdapter.sseContentBlockStop(openBlockIndex));
+                    openBlockIndex = -1;
+                }
+            }
+
+            @Override
+            public void onToken(String token) {
+                fullContent.append(token);
+                ensureStarted();
+                if (!textBlockOpen) {
+                    closeOpenBlock();
+                    openBlockIndex = nextBlockIndex++;
+                    send(anthropicAdapter.sseContentBlockStart(openBlockIndex));
+                    textBlockOpen = true;
+                }
+                send(anthropicAdapter.sseContentBlockDelta(openBlockIndex, token));
+            }
+
+            @Override
+            public void onToolCallStart(String toolName, String callId) {
+                hasToolUse = true;
+                ensureStarted();
+                closeOpenBlock();   // 文本块先关闭，再开 tool_use 块
+                textBlockOpen = false;
+                openBlockIndex = nextBlockIndex++;
+                send(anthropicAdapter.sseToolUseBlockStart(openBlockIndex, callId, toolName));
+            }
+
+            @Override
+            public void onToolCallArgs(String callId, String delta) {
+                send(anthropicAdapter.sseInputJsonDelta(openBlockIndex, delta));
+            }
+
+            @Override
+            public void onToolCallExecuting(String toolName, String arguments) {
+                // 客户端执行协议：参数已随 onToolCallArgs 流式发出，平台不执行工具，无额外事件
+            }
+
+            @Override
+            public void onUsage(int inputTokens, int output) {
+                outputTokens = output;
+            }
+
+            @Override
+            public void onDone(String fullReply) {
+                ensureStarted();
+                closeOpenBlock();
+                send(anthropicAdapter.sseMessageDelta(
+                        hasToolUse ? "tool_use" : "end_turn",
+                        Math.max(1, outputTokens > 0 ? outputTokens : fullContent.length() / 2)));
+                send(anthropicAdapter.sseMessageStop());
+                emitter.complete();
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                log.error("Anthropic agent stream error: {}", error.getMessage());
+                emitter.completeWithError(error);
+            }
+        };
+
+        new Thread(() -> agentService.executeStream(ctx, callback)).start();
         return emitter;
     }
 

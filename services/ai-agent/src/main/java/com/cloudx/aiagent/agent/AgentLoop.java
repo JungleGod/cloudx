@@ -9,6 +9,14 @@ import com.cloudx.aiagent.tool.ToolRegistry;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.*;
+import dev.langchain4j.model.chat.request.json.JsonArraySchema;
+import dev.langchain4j.model.chat.request.json.JsonBooleanSchema;
+import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
+import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
+import dev.langchain4j.model.chat.request.json.JsonNumberSchema;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
+import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.Response;
@@ -107,6 +115,11 @@ public class AgentLoop {
 
             // 情况 2：LLM 返回了 tool_calls
             if (aiMessage.hasToolExecutionRequests()) {
+                // 客户端工具模式（OpenAI 兼容 /v1 透传）：工具由调用方执行，原样返回并终止服务端循环
+                if (isClientToolMode(ctx)) {
+                    result.setClientToolCalls(toAgentToolCalls(aiMessage.toolExecutionRequests()));
+                    break;
+                }
                 if (callback != null) callback.onThinking();
 
                 List<AgentMessage.ToolCall> toolCalls = toAgentToolCalls(aiMessage.toolExecutionRequests());
@@ -161,7 +174,7 @@ public class AgentLoop {
         }
 
         // 达到最大迭代次数但未结束 → 强制 LLM 总结
-        if (result.getAnswer() == null && result.getIterations() >= maxIter) {
+        if (result.getAnswer() == null && result.getClientToolCalls() == null && result.getIterations() >= maxIter) {
             result.setInterrupted(true);
             log.info("Agent [{}] max iterations reached, forcing summary", ctx.getAgentName());
             messages.add(AgentMessage.user("你已收集了足够的信息，请基于以上工具调用结果，给出最终答案。不要再次调用工具。"));
@@ -231,6 +244,23 @@ public class AgentLoop {
 
                 // 有 tool_calls → 执行工具并循环
                 if (!streamResult.toolCalls.isEmpty()) {
+                    // 客户端工具模式（OpenAI 兼容 /v1 透传）：回调 tool_call 事件让上层组装
+                    // tool_calls chunk（finish_reason=tool_calls），终止服务端循环
+                    if (isClientToolMode(ctx)) {
+                        result.setClientToolCalls(streamResult.toolCalls);
+                        if (callback != null) {
+                            for (AgentMessage.ToolCall tc : streamResult.toolCalls) {
+                                String name = tc.getFunction().getName();
+                                String args = tc.getFunction().getArguments() != null
+                                        ? tc.getFunction().getArguments() : "{}";
+                                callback.onToolCallStart(name, tc.getId());
+                                callback.onToolCallArgs(tc.getId(), args);
+                                callback.onToolCallExecuting(name, args);
+                            }
+                        }
+                        finish(callback, result, streamResult.content != null ? streamResult.content : "");
+                        break;
+                    }
                     messages.add(AgentMessage.assistantWithToolCalls(streamResult.toolCalls));
 
                     for (AgentMessage.ToolCall tc : streamResult.toolCalls) {
@@ -281,7 +311,7 @@ public class AgentLoop {
                 break;
             }
 
-            if (result.getAnswer() == null && result.getIterations() >= maxIter) {
+            if (result.getAnswer() == null && result.getClientToolCalls() == null && result.getIterations() >= maxIter) {
                 result.setInterrupted(true);
                 messages.add(AgentMessage.user("请基于以上信息给出最终答案。不要调用工具。"));
                 StreamResult finalResp = callLLMStream(modelInfo, messages, List.of(), callback);
@@ -470,15 +500,98 @@ public class AgentLoop {
         return result;
     }
 
-    /** ToolDefinition → LangChain4j ToolSpecification */
+    /** ToolDefinition → LangChain4j ToolSpecification。
+     *  必须带参数 Schema：缺失时上游模型无法走原生 function calling，会把工具调用当文本输出 */
     private static List<ToolSpecification> toToolSpecifications(List<ToolDefinition> tools) {
         if (tools == null || tools.isEmpty()) return List.of();
         return tools.stream()
-                .map(td -> ToolSpecification.builder()
-                        .name(td.getName())
-                        .description(td.getDescription())
-                        .build())
+                .map(td -> {
+                    ToolSpecification.Builder builder = ToolSpecification.builder()
+                            .name(td.getName())
+                            .description(td.getDescription());
+                    Map<String, Object> schema = td.getParametersSchema();
+                    if (schema != null && "object".equals(schema.get("type"))) {
+                        builder.parameters((JsonObjectSchema) toJsonSchemaElement(schema));
+                    }
+                    return builder.build();
+                })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * JSON Schema（Map 形式）→ LangChain4j JsonSchemaElement，递归转换。
+     * 覆盖 object/string/integer/number/boolean/enum/array；未知类型降级为 string
+     */
+    private static JsonSchemaElement toJsonSchemaElement(Map<String, Object> schema) {
+        String type = schema.get("type") != null ? String.valueOf(schema.get("type")) : "string";
+        String description = schema.get("description") != null ? String.valueOf(schema.get("description")) : null;
+        return switch (type) {
+            case "object" -> {
+                JsonObjectSchema.Builder builder = JsonObjectSchema.builder();
+                if (description != null) builder.description(description);
+                if (schema.get("properties") instanceof Map<?, ?> properties) {
+                    properties.forEach((name, prop) ->
+                            builder.addProperty(String.valueOf(name), toJsonSchemaElement(asSchemaMap(prop))));
+                }
+                if (schema.get("required") instanceof List<?> required) {
+                    builder.required(required.stream().map(String::valueOf).toList());
+                }
+                if (schema.get("additionalProperties") instanceof Boolean ap) {
+                    builder.additionalProperties(ap);
+                }
+                yield builder.build();
+            }
+            case "array" -> {
+                JsonArraySchema.Builder builder = JsonArraySchema.builder();
+                if (description != null) builder.description(description);
+                if (schema.get("items") instanceof Map<?, ?> items) {
+                    builder.items(toJsonSchemaElement(asSchemaMap(items)));
+                }
+                yield builder.build();
+            }
+            case "integer" -> {
+                JsonIntegerSchema.Builder builder = JsonIntegerSchema.builder();
+                if (description != null) builder.description(description);
+                yield builder.build();
+            }
+            case "number" -> {
+                JsonNumberSchema.Builder builder = JsonNumberSchema.builder();
+                if (description != null) builder.description(description);
+                yield builder.build();
+            }
+            case "boolean" -> {
+                JsonBooleanSchema.Builder builder = JsonBooleanSchema.builder();
+                if (description != null) builder.description(description);
+                yield builder.build();
+            }
+            case "string" -> {
+                if (schema.get("enum") instanceof List<?> enums && !enums.isEmpty()) {
+                    JsonEnumSchema.Builder builder = JsonEnumSchema.builder()
+                            .enumValues(enums.stream().map(String::valueOf).toList());
+                    if (description != null) builder.description(description);
+                    yield builder.build();
+                }
+                JsonStringSchema.Builder builder = JsonStringSchema.builder();
+                if (description != null) builder.description(description);
+                yield builder.build();
+            }
+            default -> {
+                log.warn("Unsupported JSON Schema type '{}', falling back to string", type);
+                JsonStringSchema.Builder builder = JsonStringSchema.builder();
+                if (description != null) builder.description(description);
+                yield builder.build();
+            }
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asSchemaMap(Object o) {
+        return o instanceof Map ? (Map<String, Object>) o : Collections.emptyMap();
+    }
+
+    /** OpenAI 兼容 /v1 透传模式：调用方自带工具集，工具由客户端执行 */
+    private static boolean isClientToolMode(AgentExecutionContext ctx) {
+        return ctx.getClientTools() != null && !ctx.getClientTools().isEmpty();
     }
 
     /** LangChain4j ToolExecutionRequest → AgentMessage.ToolCall */
@@ -525,6 +638,11 @@ public class AgentLoop {
 
     /** 获取 Agent 绑定的工具（dispatch_agent 的描述动态注入子 Agent 名册） */
     private List<ToolDefinition> getTools(AgentExecutionContext ctx) {
+        // OpenAI 兼容 /v1 透传模式：调用方（如 Claude Code）自带工具集，平台不注入内部工具
+        if (isClientToolMode(ctx)) {
+            return ctx.getClientTools();
+        }
+
         List<ToolDefinition> tools;
         if (ctx.getAgentId() != null) {
             tools = toolRegistry.getToolsForAgent(ctx.getAgentId(), ctx.getCallerRole());
@@ -559,7 +677,9 @@ public class AgentLoop {
             messages.addAll(ctx.getHistory());
         }
 
-        messages.add(AgentMessage.user(ctx.getUserMessage()));
+        if (ctx.getUserMessage() != null) {
+            messages.add(AgentMessage.user(ctx.getUserMessage()));
+        }
         return messages;
     }
 
@@ -572,7 +692,7 @@ public class AgentLoop {
         sb.append("当前日期: ").append(java.time.LocalDate.now()).append("\n");
         sb.append("用户角色: ").append(ctx.getCallerRole() != null ? ctx.getCallerRole() : "user").append("\n");
 
-        if (!tools.isEmpty()) {
+        if (!tools.isEmpty() && !isClientToolMode(ctx)) {
             sb.append("\n你可以使用以下工具来完成任务。\n");
             sb.append("重要规则：\n");
             sb.append("1. 当需要查询数据时，调用相应工具获取信息\n");

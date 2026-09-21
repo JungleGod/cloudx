@@ -90,13 +90,7 @@ spring:
           predicates:
             - Path=/api/admin/**
 
-        # ===== 内部接口（不对外暴露）=====
-        - id: biz-internal
-          uri: lb://biz-service
-          predicates:
-            - Path=/api/internal/**
-
-  # Nacos 不再需要手动配置（在 bootstrap.yml 里）
+  # 内部接口 /api/internal/** 不在 gateway 路由——服务间调用由 ai-agent 直连 biz-service，公网不可达（2026-09-21 安全修复）
 
 # JWT 密钥（与 biz-service 一致）
 jwt:
@@ -105,7 +99,7 @@ jwt:
 # 鉴权白名单（无需 Token）
 gateway:
   auth:
-    white-list: /api/user/register,/api/user/login,/api/models,/health,/actuator/health,/api/internal/,/v1/
+    white-list: /api/user/register,/api/user/login,/api/models,/health,/actuator/health,/v1/
 
 # Actuator
 management:

@@ -41,6 +41,27 @@ public final class AnthropicDTOs {
         private List<String> stopSequences;
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private Map<String, Object> metadata;
+        /** 客户端声明可自行执行的工具（如 Claude Code 的 Bash/Read/Edit）；非空走「客户端执行」协议 */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private List<ToolDef> tools;
+        @JsonProperty("tool_choice")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Object toolChoice;
+    }
+
+    /** 客户端工具定义：{name, description, input_schema(JSON Schema)} */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ToolDef {
+        private String name;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private String description;
+        @JsonProperty("input_schema")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Map<String, Object> inputSchema;
     }
 
     @Data
@@ -56,11 +77,18 @@ public final class AnthropicDTOs {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ContentBlock {
-        private String type;    // "text" or "image"
+        private String type;    // "text" | "image" | "tool_use"
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private String text;
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private ImageSource source;
+        // ---- tool_use 块专用 ----
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private String id;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private String name;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Map<String, Object> input;
     }
 
     @Data

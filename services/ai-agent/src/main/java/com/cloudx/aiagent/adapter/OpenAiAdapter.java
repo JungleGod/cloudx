@@ -212,33 +212,68 @@ public class OpenAiAdapter {
 
         // 最后一条 user 消息
         String userMessage = "";
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if ("user".equals(messages.get(i).getRole())) {
-                userMessage = messages.get(i).getContent();
-                break;
-            }
-        }
 
         // 构建历史（所有非最后一条 user 的消息，包括 assistant 的 tool_calls）
         List<com.cloudx.aiagent.agent.AgentMessage> history = new ArrayList<>();
-        int lastUserIdx = -1;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if ("user".equals(messages.get(i).getRole())) {
-                lastUserIdx = i;
-                break;
+
+        // 透传调用方声明的工具（如 Claude Code 的 Bash/Read/Edit）→ 走「客户端执行」协议
+        List<com.cloudx.aiagent.tool.ToolDefinition> clientTools = null;
+        if (req.getTools() != null && !req.getTools().isEmpty()) {
+            clientTools = new ArrayList<>();
+            for (ToolDef t : req.getTools()) {
+                if (t.getFunction() == null || t.getFunction().getName() == null) continue;
+                com.cloudx.aiagent.tool.ToolDefinition td = new com.cloudx.aiagent.tool.ToolDefinition();
+                td.setName(t.getFunction().getName());
+                td.setDescription(t.getFunction().getDescription() != null ? t.getFunction().getDescription() : "");
+                td.setParametersSchema(t.getFunction().getParameters() != null
+                        ? t.getFunction().getParameters() : Collections.emptyMap());
+                clientTools.add(td);
             }
+            if (clientTools.isEmpty()) clientTools = null;
         }
-        if (lastUserIdx > 0) {
-            for (int i = 0; i < lastUserIdx; i++) {
-                Message m = messages.get(i);
+
+        if (clientTools != null) {
+            // 客户端工具协议：完整消息序列进 history（含 assistant tool_calls / tool 结果）。
+            // 最后一条往往是 tool 消息，不能按「最后一条 user」切分，userMessage 置空由 history 承载
+            userMessage = null;
+            for (Message m : messages) {
+                if ("system".equals(m.getRole())) continue;
                 com.cloudx.aiagent.agent.AgentMessage am = switch (m.getRole()) {
                     case "user" -> com.cloudx.aiagent.agent.AgentMessage.user(m.getContent());
                     case "assistant" -> buildAgentAssistantMessage(m);
                     case "tool" -> com.cloudx.aiagent.agent.AgentMessage.tool(
-                            m.getToolCallId(), "unknown", m.getContent());
+                            m.getToolCallId(), null, m.getContent());
                     default -> null;
                 };
                 if (am != null) history.add(am);
+            }
+        } else {
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                if ("user".equals(messages.get(i).getRole())) {
+                    userMessage = messages.get(i).getContent();
+                    break;
+                }
+            }
+
+            int lastUserIdx = -1;
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                if ("user".equals(messages.get(i).getRole())) {
+                    lastUserIdx = i;
+                    break;
+                }
+            }
+            if (lastUserIdx > 0) {
+                for (int i = 0; i < lastUserIdx; i++) {
+                    Message m = messages.get(i);
+                    com.cloudx.aiagent.agent.AgentMessage am = switch (m.getRole()) {
+                        case "user" -> com.cloudx.aiagent.agent.AgentMessage.user(m.getContent());
+                        case "assistant" -> buildAgentAssistantMessage(m);
+                        case "tool" -> com.cloudx.aiagent.agent.AgentMessage.tool(
+                                m.getToolCallId(), "unknown", m.getContent());
+                        default -> null;
+                    };
+                    if (am != null) history.add(am);
+                }
             }
         }
 
@@ -252,6 +287,7 @@ public class OpenAiAdapter {
                 .systemPrompt(systemPrompt)
                 .userMessage(userMessage)
                 .history(history)
+                .clientTools(clientTools)
                 .modelName(model)
                 .temperature(req.getTemperature())
                 .stream(req.getStream() != null && req.getStream())
@@ -284,9 +320,20 @@ public class OpenAiAdapter {
             String requestId, String displayModel) {
         long now = System.currentTimeMillis() / 1000;
 
-        // 如果有工具调用步骤，转换为 tool_calls 格式
+        // 客户端工具模式（/v1 透传）：模型请求的 tool_calls 原样返回（保留原始 id，客户端按 id 回传结果）
         List<ToolCall> openAiToolCalls = null;
-        if (!result.getToolSteps().isEmpty()) {
+        if (result.getClientToolCalls() != null && !result.getClientToolCalls().isEmpty()) {
+            openAiToolCalls = result.getClientToolCalls().stream()
+                    .map(tc -> ToolCall.builder()
+                            .id(tc.getId())
+                            .type("function")
+                            .function(ToolCallFunction.builder()
+                                    .name(tc.getFunction().getName())
+                                    .arguments(tc.getFunction().getArguments())
+                                    .build())
+                            .build())
+                    .toList();
+        } else if (!result.getToolSteps().isEmpty()) {
             openAiToolCalls = result.getToolSteps().stream()
                     .map(s -> ToolCall.builder()
                             .id("call_" + UUID.randomUUID().toString().substring(0, 8))
@@ -309,7 +356,8 @@ public class OpenAiAdapter {
         var choiceBuilder = Choice.builder()
                 .index(0)
                 .message(msgBuilder.build())
-                .finishReason(result.isInterrupted() ? "length" : "stop");
+                .finishReason(openAiToolCalls != null ? "tool_calls"
+                        : (result.isInterrupted() ? "length" : "stop"));
 
         return ChatCompletionResponse.builder()
                 .id(requestId)

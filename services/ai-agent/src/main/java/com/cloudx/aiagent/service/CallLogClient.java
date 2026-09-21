@@ -1,5 +1,6 @@
 package com.cloudx.aiagent.service;
 
+import com.cloudx.aiagent.config.InternalAuthInterceptor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -18,8 +19,10 @@ public class CallLogClient {
     private final RestTemplate restTemplate;
     private final String bizServiceUrl;
 
-    public CallLogClient(@Value("${cloudx.biz-service.url:http://localhost:8081}") String bizServiceUrl) {
+    public CallLogClient(@Value("${cloudx.biz-service.url:http://localhost:8081}") String bizServiceUrl,
+                         InternalAuthInterceptor internalAuth) {
         this.restTemplate = new RestTemplate();
+        this.restTemplate.getInterceptors().add(internalAuth);
         this.bizServiceUrl = bizServiceUrl;
     }
 

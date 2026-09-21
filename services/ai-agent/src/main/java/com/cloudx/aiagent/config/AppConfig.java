@@ -17,7 +17,7 @@ import java.util.concurrent.Executor;
 public class AppConfig {
 
     @Bean
-    public RestTemplate restTemplate() {
+    public RestTemplate restTemplate(InternalAuthInterceptor internalAuth) {
         RestTemplate restTemplate = new RestTemplate();
         // 强制 UTF-8，解决中文乱码
         restTemplate.getMessageConverters().forEach(converter -> {
@@ -25,6 +25,8 @@ public class AppConfig {
                 ((StringHttpMessageConverter) converter).setDefaultCharset(StandardCharsets.UTF_8);
             }
         });
+        // 服务间调用携带内部 Token（biz-service /api/internal/** 校验）
+        restTemplate.getInterceptors().add(internalAuth);
         return restTemplate;
     }
 

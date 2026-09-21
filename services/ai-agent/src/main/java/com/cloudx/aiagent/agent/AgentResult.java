@@ -41,6 +41,9 @@ public class AgentResult {
     /** 是否被中断（达到最大迭代次数） */
     private boolean interrupted;
 
+    /** 客户端工具模式（OpenAI 兼容 /v1 透传）下模型请求的原始 tool_calls，由调用方执行后回传 */
+    private List<AgentMessage.ToolCall> clientToolCalls;
+
     // ---- inner record: ToolStep ----
 
     @Data

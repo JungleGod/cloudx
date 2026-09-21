@@ -1,5 +1,6 @@
 package com.cloudx.aiagent.agent;
 
+import com.cloudx.aiagent.tool.ToolDefinition;
 import lombok.Builder;
 import lombok.Data;
 
@@ -40,6 +41,10 @@ public class AgentExecutionContext {
 
     /** 对话历史 */
     private List<AgentMessage> history;
+
+    /** 调用方自带工具（OpenAI 兼容 /v1 的 tools 透传，如 Claude Code 的工具集）。
+     *  非空时走「客户端执行」协议：模型返回 tool_calls 后原样返回给调用方，平台不代执行 */
+    private List<ToolDefinition> clientTools;
 
     /** 绑定的模型名（null 则自动路由） */
     private String modelName;

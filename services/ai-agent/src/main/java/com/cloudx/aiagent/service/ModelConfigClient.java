@@ -1,5 +1,6 @@
 package com.cloudx.aiagent.service;
 
+import com.cloudx.aiagent.config.InternalAuthInterceptor;
 import com.cloudx.aiagent.config.ModelConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +33,8 @@ public class ModelConfigClient {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String bizServiceUrl;
 
-    public ModelConfigClient(@Value("${cloudx.biz-service.url:http://localhost:8081}") String bizServiceUrl) {
+    public ModelConfigClient(@Value("${cloudx.biz-service.url:http://localhost:8081}") String bizServiceUrl,
+                             InternalAuthInterceptor internalAuth) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(3000);
         factory.setReadTimeout(3000);
@@ -42,6 +44,7 @@ public class ModelConfigClient {
                 s.setDefaultCharset(StandardCharsets.UTF_8);
             }
         });
+        this.restTemplate.getInterceptors().add(internalAuth);
         this.bizServiceUrl = bizServiceUrl;
     }
 
