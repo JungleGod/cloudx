@@ -22,4 +22,7 @@ public interface ApiKeyService extends IService<ApiKey> {
 
     /** 仅通过 SecretKey 验证（用于 OpenAI 兼容 API 的 Bearer Token 认证） */
     ApiKey verifyBySecretKey(String secretKey);
+
+    /** 仅通过 AccessKey 查找（AK/SK 签名验签用：gateway 取回明文 SK 计算 HMAC） */
+    ApiKey findByAccessKey(String accessKey);
 }

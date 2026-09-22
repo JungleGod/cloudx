@@ -96,6 +96,10 @@ spring:
 jwt:
   secret: cloudx-ai-gateway-secret-key-2026-min-32bytes
 
+# 服务间内部 Token（AK/SK 验签需调 biz-service 内部接口取密钥，与 biz/ai-agent 保持一致）
+cloudx:
+  internal-token: ${INTERNAL_TOKEN:cloudx-internal-dev-2026}
+
 # 鉴权白名单（无需 Token）
 gateway:
   auth:

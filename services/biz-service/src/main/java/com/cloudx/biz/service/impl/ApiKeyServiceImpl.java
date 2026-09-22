@@ -73,6 +73,16 @@ public class ApiKeyServiceImpl extends ServiceImpl<ApiKeyMapper, ApiKey> impleme
     }
 
     @Override
+    public ApiKey findByAccessKey(String accessKey) {
+        if (accessKey == null || accessKey.isBlank()) {
+            return null;
+        }
+        return getOne(new LambdaQueryWrapper<ApiKey>()
+                .eq(ApiKey::getAccessKey, accessKey.trim())
+                .eq(ApiKey::getStatus, 1));
+    }
+
+    @Override
     public ApiKey verifyBySecretKey(String secretKey) {
         if (secretKey == null || secretKey.isBlank()) {
             throw new BizException(401, "API Key 不能为空");

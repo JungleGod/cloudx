@@ -3,6 +3,7 @@ package com.cloudx.biz.controller;
 import com.cloudx.biz.entity.*;
 import com.cloudx.biz.mapper.SysUserMapper;
 import com.cloudx.biz.service.*;
+import com.cloudx.biz.util.AesUtil;
 import com.cloudx.biz.util.JwtUtil;
 import com.cloudx.common.result.R;
 import lombok.RequiredArgsConstructor;
@@ -68,6 +69,34 @@ public class CallLogController {
                 "userId", key.getUserId(),
                 "keyId", key.getId()
         ));
+    }
+
+    /**
+     * 内部接口：按 AccessKey 下发明文 SecretKey（AK/SK 签名验签，被 gateway 调用）。
+     * gateway 拿 SK 在本地算 HMAC-SHA256 与 X-Signature 比对。
+     * 无效/禁用/过期统一返回 valid=false，不暴露存在性差异。
+     */
+    @PostMapping("/api/internal/keys/ak")
+    public R<Map<String, Object>> resolveByAccessKey(@RequestBody Map<String, String> body) {
+        String accessKey = body.get("accessKey");
+        ApiKey key = apiKeyService.findByAccessKey(accessKey);
+        if (key == null
+                || (key.getExpiredAt() != null && key.getExpiredAt().isBefore(java.time.LocalDateTime.now()))) {
+            return R.ok(Map.of("valid", false));
+        }
+        SysUser user = key.getUserId() != null ? sysUserMapper.selectById(key.getUserId()) : null;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("valid", true);
+        data.put("userId", key.getUserId());
+        data.put("keyId", key.getId());
+        data.put("secretKey", resolvePlainSecretKey(key.getSecretKey()));
+        data.put("role", user != null && user.getRole() != null ? user.getRole() : "user");
+        return R.ok(data);
+    }
+
+    /** 兼容历史数据：SK 加密改造前创建的 Key 存的是明文（SK- 前缀）；密文是标准 Base64，不可能以 SK- 开头 */
+    private String resolvePlainSecretKey(String stored) {
+        return stored != null && stored.startsWith("SK-") ? stored : AesUtil.decrypt(stored);
     }
 
     /** 内部接口：额度校验（被 ai-agent 调用，调用模型前拦截超额度请求） */
